@@ -233,6 +233,15 @@ a.chip { text-decoration: none; display: inline-block; }
 .key-row b { font-family: var(--display); font-weight: 400; color: var(--blue); }
 .remote-scores { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: center; color: var(--muted); font-weight: 600; }
 .remote-scores b { color: var(--gold); font-family: var(--display); font-weight: 400; }
+.stakes { display: flex; flex-direction: column; gap: 10px; background: rgba(0,0,0,.22); border-radius: 16px; padding: 14px; }
+.phone-strikes { display: flex; justify-content: center; gap: 10px; }
+.pstrike { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 14px; border: 3px solid rgba(255,255,255,.2); color: rgba(255,255,255,.15); font: 800 2.4rem var(--body); }
+.pstrike.on { background: var(--red); border-color: #ffffff; color: #ffffff; animation: pop .35s cubic-bezier(.3,1.8,.5,1) both; }
+.stakes-line { font-weight: 700; font-size: 1.15rem; text-wrap: balance; }
+.stakes-nums { display: flex; justify-content: center; gap: 18px; color: var(--muted); font-weight: 600; }
+.stakes-nums b, .mini-scores b { font-family: var(--display); font-weight: 400; color: var(--gold); font-size: 1.4rem; margin-left: 4px; }
+.mini-scores { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; font-weight: 600; color: var(--muted); }
+.mini-scores .me { color: var(--white); }
 .sent-note { font-weight: 700; font-size: 1.2rem; }
 .stage.open { justify-content: center; gap: clamp(16px, 3vh, 36px); }
 .stage.open .question { font-size: clamp(2.2rem, 4.6vw, 5rem); }

@@ -2153,7 +2153,7 @@ function Phone({ db, room, code, name, onLeave }) {
         </div>, { cls: "phone-buzz" }
       );
     }
-    return frame(<WatchCard key={s.roundKey} s={s} rec={rec} send={send} title="Watch the face-off" sub={`${nameOf(s, f.p1)} vs ${nameOf(s, f.p2)}`} />);
+    return frame(<WatchCard key={s.roundKey} s={s} mySide={mySide} title={`Face-off: ${nameOf(s, f.p1)} vs ${nameOf(s, f.p2)}`} />);
   }
 
   if (s.phase === "round" || s.phase === "steal") {
@@ -2164,7 +2164,7 @@ function Phone({ db, room, code, name, onLeave }) {
     const answer = s.turn?.pids?.includes(pid)
       ? <AnswerBox key={s.turn.id} s={s} rec={rec} send={send} label={s.phase === "steal" ? "One answer to steal. Agree as a team, then type it" : "Type your team's next answer"} />
       : null;
-    return frame(<WatchCard key={s.roundKey} s={s} rec={rec} send={send} title={title} sub={`Bank: ${s.bank} · Strikes: ${s.strikes}`} hot={mine} answer={answer} />);
+    return frame(<WatchCard key={s.roundKey} s={s} mySide={mySide} title={title} hot={mine} answer={answer} />);
   }
 
   if (s.phase === "pick" || s.phase === "roundEnd") {
@@ -2413,39 +2413,59 @@ function SurveyCard({ s, rec, send, hostNow }) {
   );
 }
 
-function WatchCard({ s, rec, send, title, sub, hot, answer }) {
-  if (s.openQ) {
-    return (
-      <div className={"phone-card" + (hot ? " hot" : "")}>
-        <h2 className="display text-3xl">{title}</h2>
-        <p className="muted">{sub}</p>
-        <p className="phone-q big">{s.question}</p>
-        <p className="muted">Quiet in the audience! Let them answer.</p>
-      </div>
-    );
+// What's at stake right now, in plain words, from the point of view of `mySide`.
+function situation(s, mySide) {
+  const who = (side) => (side === mySide ? (s.settings.mode === "teams" ? "your team" : "you") : sideName(s, side));
+  const Who = (side) => { const w = who(side); return w.charAt(0).toUpperCase() + w.slice(1); };
+  const hidden = s.board.filter((c) => !c.r).length;
+  if (s.phase === "faceoff") {
+    const f = s.face;
+    if (s.openQ) return "First to buzz answers. Right answer wins the points!";
+    if (f.stage === "answer2") return `${nameOf(s, f.first?.pid)} missed! ${nameOf(s, f.answering)} can win control with any answer on the board.`;
+    if (f.stage === "answer1") return `${nameOf(s, f.answering)} buzzed first. Any answer on the board wins control.`;
+    return "First to buzz answers. Any answer on the board wins control for their team.";
   }
-  const mine = rec.guess?.id === s.roundKey ? rec.guess.text : "";
-  const [text, setText] = useState(mine);
-  const submit = (e) => {
-    e.preventDefault();
-    const t = clean(text, 32);
-    if (!t) return;
-    send({ guess: { id: s.roundKey, text: t } });
-  };
+  if (s.phase === "round") {
+    const other = otherSide(s, s.control);
+    if (s.strikes === 0) return `${Who(s.control)} ${who(s.control) === "you" ? "are" : "is"} on a roll. ${hidden} ${hidden === 1 ? "answer" : "answers"} left to find. Clear the board to keep all ${s.bank} points!`;
+    if (s.strikes === 1) return `1 strike. Two more and ${who(other)} can steal the ${s.bank} points.`;
+    return `2 strikes! One more X and ${who(other)} get${who(other) === "you" ? "" : "s"} a chance to steal all ${s.bank} points!`;
+  }
+  if (s.phase === "steal") {
+    return `${Who(s.stealSide)} get${who(s.stealSide) === "you" ? "" : "s"} ONE guess. Right answer steals all ${s.bank} points. Wrong and ${who(s.control)} keep${who(s.control) === "you" ? "" : "s"} them.`;
+  }
+  return "";
+}
+
+function WatchCard({ s, title, hot, answer, mySide }) {
+  const st = standings(s);
+  const hidden = s.board.filter((c) => !c.r).length;
+  const showStrikes = s.phase === "round" || s.phase === "steal";
   return (
     <div className={"phone-card" + (hot ? " hot" : "")}>
       <h2 className="display text-3xl">{title}</h2>
-      <p className="muted">{sub}</p>
       <p className="phone-q">{s.question}</p>
-      {s.typed && <p className={"typed small " + s.typed.verdict}>{s.typed.name}: “{s.typed.text}” {s.typed.verdict === "hit" ? "✓" : s.typed.verdict === "dup" ? "(already up)" : s.typed.verdict === "override" ? "(host is deciding)" : "✕"}</p>}
-      {answer ? answer : <form onSubmit={submit} className="guess-form">
-        <label className="field">
-          <span>Your secret guess for the board</span>
-          <input id="watch-guess" className="input" value={text} maxLength={32} onChange={(e) => setText(e.target.value)} placeholder="Type one short guess" autoComplete="off" />
-        </label>
-        <button type="submit" className="btn btn-blue w-full" disabled={!clean(text) || clean(text) === mine}>{mine ? (clean(text) === mine ? "Guess saved ✓" : "Change guess") : "Save guess"}</button>
-      </form>}
-      {!answer && <p className="muted text-sm">If it shows up on the board, you'll get a shout-out after the round.</p>}
+      {s.typed && <p className={"typed small " + s.typed.verdict}>{s.typed.name}: “{s.typed.text}” {s.typed.verdict === "hit" ? "✓ on the board" : s.typed.verdict === "dup" ? "(already up)" : s.typed.verdict === "override" ? "(host is deciding)" : "✕ not on the board"}</p>}
+      {answer}
+      <div className="stakes">
+        {showStrikes && (
+          <div className="phone-strikes" aria-label={`${s.strikes} of 3 strikes`}>
+            {[0, 1, 2].map((i) => <span key={i} className={"pstrike" + (i < s.strikes ? " on" : "")}>✕</span>)}
+          </div>
+        )}
+        <p className="stakes-line">{situation(s, mySide)}</p>
+        {!s.openQ && s.board.length > 0 && (
+          <div className="stakes-nums">
+            <span>Bank <b>{s.bank}</b></span>
+            <span>Hidden answers <b>{hidden}</b></span>
+          </div>
+        )}
+      </div>
+      <div className="mini-scores">
+        {st.map((x) => (
+          <span key={x.side} className={x.side === mySide ? "me" : ""}>{x.name}{x.side === mySide ? " (you)" : ""} <b>{x.score}</b></span>
+        ))}
+      </div>
     </div>
   );
 }
