@@ -1,0 +1,23 @@
+{
+  "name": "chanuka-family-feud",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gershonw93/chanuka-family-feud.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/gershonw93/chanuka-family-feud/issues"
+  },
+  "homepage": "https://github.com/gershonw93/chanuka-family-feud#readme",
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}

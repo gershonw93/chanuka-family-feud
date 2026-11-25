@@ -1,0 +1,1692 @@
+<title>Latke Feud</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Rubik:wght@400;500;700;800&display=swap">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<style>
+/* Layout: a TV game-show stage (scores | board | scores) on night-blue; phones get one big centered card. */
+:root {
+  color-scheme: dark;
+  --night: #071338;
+  --navy: #0d2160;
+  --blue: #1f4fd1;
+  --sky: #7fb0ff;
+  --gold: #f5c542;
+  --gold-deep: #c98f12;
+  --white: #ffffff;
+  --ink: #0a1a4a;
+  --red: #e5484d;
+  --muted: #b7c6ee;
+  --line: rgba(255, 255, 255, 0.14);
+  --display: "Bagel Fat One", "Rubik", system-ui, sans-serif;
+  --body: "Rubik", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--night);
+  color: var(--white);
+  font-family: var(--body);
+  font-size: 16px;
+  -webkit-tap-highlight-color: transparent;
+}
+#root { min-height: 100%; }
+.screen {
+  min-height: 100%;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px;
+  box-sizing: border-box;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(31, 79, 209, 0.55), transparent 70%),
+    radial-gradient(2px 2px at 12% 22%, rgba(255,255,255,.7), transparent 60%),
+    radial-gradient(1.5px 1.5px at 78% 14%, rgba(255,255,255,.6), transparent 60%),
+    radial-gradient(2px 2px at 64% 72%, rgba(245,197,66,.6), transparent 60%),
+    radial-gradient(1.5px 1.5px at 30% 82%, rgba(255,255,255,.5), transparent 60%),
+    radial-gradient(1.5px 1.5px at 90% 52%, rgba(255,255,255,.5), transparent 60%),
+    var(--night);
+  overflow-x: hidden;
+}
+.screen.center { align-items: center; justify-content: center; text-align: center; }
+.display { font-family: var(--display); font-weight: 400; letter-spacing: 0.01em; line-height: 1.05; text-wrap: balance; }
+.gold { color: var(--gold); }
+.muted { color: var(--muted); }
+.eyebrow { text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; font-size: 0.85rem; color: var(--sky); }
+.err { color: #ffb4b6; font-weight: 500; }
+.panel {
+  background: linear-gradient(180deg, rgba(31,79,209,.35), rgba(13,33,96,.75));
+  border: 2px solid var(--line);
+  border-radius: 22px;
+  padding: 24px;
+  display: flex; flex-direction: column; gap: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.35);
+}
+.pulse { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
+
+/* Buttons */
+.btn {
+  font-family: var(--body); font-weight: 800; font-size: 1.1rem;
+  border-radius: 999px; padding: 0.8em 1.5em; border: 0; cursor: pointer;
+  transition: transform .12s ease, filter .12s ease, box-shadow .12s ease;
+  box-shadow: 0 5px 0 rgba(0,0,0,.35);
+}
+.btn:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 2px 0 rgba(0,0,0,.35); }
+.btn:hover:not(:disabled) { filter: brightness(1.08); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-big { font-size: clamp(1.15rem, 1.6vw, 1.6rem); padding: .8em 1.6em; }
+.btn-gold { background: linear-gradient(180deg, #ffe08a, var(--gold) 45%, var(--gold-deep)); color: var(--ink); }
+.btn-blue { background: linear-gradient(180deg, #5b8cff, var(--blue)); color: var(--white); }
+.btn-red { background: linear-gradient(180deg, #ff7a7e, var(--red)); color: var(--white); }
+.btn-ghost { background: rgba(255,255,255,.08); color: var(--white); border: 2px solid var(--line); box-shadow: none; }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+.chip {
+  background: rgba(255,255,255,.08); border: 1.5px solid var(--line); color: var(--white);
+  border-radius: 999px; padding: .45em .95em; font-weight: 600; font-size: .95rem; cursor: pointer; white-space: nowrap;
+}
+.chip:disabled { opacity: .4; cursor: default; }
+.chip-on { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+.chip-warn { background: var(--red); border-color: var(--red); }
+.input {
+  width: 100%; box-sizing: border-box; font: 500 1.2rem var(--body);
+  padding: .75em .9em; border-radius: 14px; border: 2px solid var(--line);
+  background: rgba(255,255,255,.95); color: var(--ink);
+}
+.input::placeholder { color: #7a86a8; }
+.code-input { font-family: var(--display); font-size: 2rem; letter-spacing: .3em; text-transform: uppercase; text-align: center; }
+.big-input { font-size: 1.5rem; text-align: center; }
+.field { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
+
+/* Menorah */
+.menorah { display: inline-flex; flex-direction: column; align-items: center; }
+.menorah .candles { display: flex; align-items: flex-end; gap: var(--gap, 6px); }
+.menorah .candle { position: relative; width: var(--cw, 8px); height: var(--ch, 26px); border-radius: 2px; background: linear-gradient(180deg, #ffffff, #c9d8ff); }
+.menorah .candle.shamash { height: calc(var(--ch, 26px) * 1.35); }
+.menorah .flame { position: absolute; left: 50%; bottom: 100%; width: calc(var(--cw, 8px) * 1.1); height: calc(var(--cw, 8px) * 1.9); transform: translateX(-50%); border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: radial-gradient(circle at 50% 70%, #fff7c2, var(--gold) 45%, rgba(245,140,30,.0) 75%); opacity: 0; transition: opacity .4s; }
+.menorah .candle.on .flame { opacity: 1; animation: flicker 1.6s ease-in-out infinite; transform-origin: 50% 100%; }
+.menorah .candle:nth-child(odd).on .flame { animation-duration: 1.9s; }
+@keyframes flicker { 0%,100% { transform: translateX(-50%) scale(1) rotate(-2deg); } 50% { transform: translateX(-50%) scale(.88, 1.08) rotate(3deg); } }
+.menorah-base { width: 100%; height: var(--bh, 6px); margin-top: 3px; border-radius: 0 0 8px 8px; background: linear-gradient(180deg, var(--gold), var(--gold-deep)); }
+.menorah.sm { --cw: 6px; --ch: 18px; --gap: 5px; --bh: 4px; }
+.menorah.lg { --cw: 14px; --ch: 46px; --gap: 12px; --bh: 9px; margin-bottom: 8px; }
+
+/* Landing */
+.landing { justify-content: center; }
+.landing-inner { width: 100%; max-width: 980px; margin: 0 auto; display: grid; gap: 20px; grid-template-columns: 1fr 1fr; align-items: start; }
+.landing-inner > .text-center { grid-column: 1 / -1; }
+.title { font-size: clamp(3.4rem, 9vw, 7rem); color: var(--gold); text-shadow: 0 6px 0 var(--gold-deep), 0 12px 30px rgba(0,0,0,.5); margin: 6px 0 4px; }
+.tagline { font-size: clamp(1.05rem, 2vw, 1.4rem); color: var(--muted); }
+@media (max-width: 720px) { .landing-inner { grid-template-columns: 1fr; } }
+
+/* Host */
+.host { height: 100dvh; min-height: 0; overflow: hidden; gap: 10px; }
+.host-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.brand { font-size: clamp(1.4rem, 2.2vw, 2.2rem); color: var(--gold); }
+.round-pill, .code-pill { background: rgba(255,255,255,.1); border: 1.5px solid var(--line); border-radius: 999px; padding: .35em .9em; font-weight: 700; font-size: clamp(.95rem, 1.2vw, 1.25rem); white-space: nowrap; }
+.code-pill b { font-family: var(--display); font-weight: 400; color: var(--gold); letter-spacing: .12em; margin-left: .3em; }
+.sync-banner { background: var(--red); color: white; font-weight: 600; border-radius: 12px; padding: 10px 14px; }
+
+.lobby { flex: 1; min-height: 0; display: grid; grid-template-columns: 1.1fr 1fr; gap: 24px; }
+.lobby-code { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.big-code { display: flex; gap: clamp(8px, 1.2vw, 18px); margin: 12px 0; }
+.big-code span { font-family: var(--display); font-size: clamp(4.5rem, 12vw, 11rem); line-height: 1; color: var(--ink); background: linear-gradient(180deg, #ffffff, #dbe6ff); border-radius: 22px; padding: .08em .22em .14em; box-shadow: 0 8px 0 var(--gold-deep), 0 0 0 4px var(--gold); animation: pop .6s cubic-bezier(.3,1.6,.5,1) both; }
+@keyframes pop { from { transform: scale(.4) rotate(-8deg); opacity: 0; } }
+.lobby-steps { font-size: clamp(1.3rem, 2.4vw, 2.2rem); }
+.lobby-side { background: rgba(13,33,96,.6); border: 2px solid var(--line); border-radius: 22px; padding: 20px; display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
+.settings { display: flex; flex-wrap: wrap; gap: 14px 22px; }
+.setting { display: flex; flex-direction: column; gap: 6px; }
+.setting-label { font-size: .8rem; text-transform: uppercase; letter-spacing: .12em; color: var(--sky); font-weight: 700; }
+.stepper { display: flex; align-items: center; gap: 10px; }
+.stepper button { width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--line); background: rgba(255,255,255,.08); color: white; font-size: 1.5rem; cursor: pointer; }
+.stepper b { font-family: var(--display); font-weight: 400; font-size: 2rem; min-width: 2ch; text-align: center; color: var(--gold); }
+.seg { display: inline-flex; background: rgba(0,0,0,.25); border-radius: 999px; padding: 4px; flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; color: var(--muted); font-weight: 700; padding: .5em 1em; border-radius: 999px; cursor: pointer; font-size: 1rem; }
+.seg button.on { background: var(--gold); color: var(--ink); }
+.team-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.team-col { border-radius: 16px; padding: 12px; border: 2px solid var(--line); background: rgba(0,0,0,.18); min-width: 0; }
+.team-col h3 { font-size: 1.4rem; margin-bottom: 8px; }
+.team-col ul, .solo-list { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 0; }
+.team-a { --team: var(--sky); }
+.team-b { --team: var(--gold); }
+.team-col.team-a, .team-col.team-b { border-color: var(--team); }
+.team-col.team-a h3, .team-col.team-b h3 { color: var(--team); }
+.player-chip { display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,.1); border-radius: 999px; padding: 4px 6px 4px 12px; font-weight: 600; animation: pop .4s cubic-bezier(.3,1.6,.5,1) both; }
+.player-name { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; padding: 2px 0; }
+.player-x { background: none; border: 0; color: var(--muted); font-size: 1.2rem; cursor: pointer; padding: 0 4px; }
+.mini { border: 0; border-radius: 999px; padding: 3px 8px; font-weight: 700; font-size: .8rem; cursor: pointer; }
+.mini.a { background: var(--sky); color: var(--ink); }
+.mini.b { background: var(--gold); color: var(--ink); }
+
+.game { flex: 1; min-height: 0; display: grid; gap: clamp(10px, 1.4vw, 22px); }
+.game.teams { grid-template-columns: minmax(140px, 15vw) 1fr minmax(140px, 15vw); }
+.game.solo { grid-template-columns: 1fr minmax(180px, 20vw); }
+.stage { display: flex; flex-direction: column; gap: clamp(8px, 1.2vh, 16px); min-height: 0; min-width: 0; }
+.question { font-family: var(--display); font-weight: 400; font-size: clamp(1.8rem, 3.6vw, 4rem); line-height: 1.08; text-align: center; text-wrap: balance; margin: 0; text-shadow: 0 4px 0 rgba(0,0,0,.35); }
+.board-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: clamp(8px, 1.4vh, 16px); }
+.board { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: clamp(8px, 1vw, 14px); padding: clamp(10px, 1.2vw, 18px); border-radius: 26px; background: linear-gradient(180deg, var(--gold), var(--gold-deep)); box-shadow: inset 0 0 0 4px rgba(255,255,255,.35), 0 16px 50px rgba(0,0,0,.45); }
+.board.compact { grid-template-columns: 1fr; }
+.card { perspective: 900px; border: 0; padding: 0; background: none; min-height: 0; cursor: default; font: inherit; color: inherit; }
+.card.tappable { cursor: pointer; }
+.card-inner { position: relative; display: block; width: 100%; height: 100%; height: clamp(54px, 10vh, 118px); transform-style: preserve-3d; transition: transform .6s cubic-bezier(.4,1.5,.5,1); }
+.card.revealed .card-inner { transform: rotateX(180deg); }
+.card-face { position: absolute; inset: 0; display: flex; align-items: center; border-radius: 14px; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.card-front { justify-content: center; background: linear-gradient(180deg, #2f63e8, var(--navy)); border: 3px solid rgba(255,255,255,.25); }
+.card.tappable .card-front { border-color: rgba(255,255,255,.6); }
+.card.tappable:hover .card-front { filter: brightness(1.15); }
+.card-num { font-family: var(--display); font-size: clamp(1.6rem, 3vw, 3.2rem); color: var(--ink); background: radial-gradient(circle at 40% 35%, #fff4c2, var(--gold) 60%, var(--gold-deep)); width: 1.6em; height: 1.6em; border-radius: 50%; display: grid; place-items: center; box-shadow: 0 3px 0 rgba(0,0,0,.35); }
+.card-peek { position: absolute; left: 12px; bottom: 6px; font-size: .8rem; color: rgba(255,255,255,.35); font-weight: 500; max-width: 80%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-back { transform: rotateX(180deg); justify-content: space-between; gap: 10px; padding: 0 0 0 clamp(12px, 1.4vw, 24px); background: linear-gradient(180deg, #ffffff, #e2eaff); color: var(--ink); border: 3px solid #ffffff; overflow: hidden; }
+.card.late .card-back { background: linear-gradient(180deg, #dfe6f7, #c3cfe9); color: #3a4a78; }
+.card-text { font-weight: 800; font-size: clamp(1.1rem, 2.2vw, 2.4rem); text-transform: uppercase; letter-spacing: .02em; line-height: 1.05; min-width: 0; overflow-wrap: anywhere; text-align: left; padding-block: 4px; }
+.card-pts { font-family: var(--display); font-size: clamp(1.5rem, 2.8vw, 3rem); background: var(--blue); color: white; align-self: stretch; display: grid; place-items: center; padding: 0 .45em; min-width: 2.2em; }
+.card.late .card-pts { background: #7d8db8; }
+.bank { align-self: center; display: flex; align-items: center; gap: 14px; background: rgba(0,0,0,.3); border: 2px solid var(--gold); border-radius: 999px; padding: .3em 1.2em; font-weight: 700; font-size: clamp(1rem, 1.4vw, 1.4rem); text-transform: uppercase; letter-spacing: .1em; }
+.bank b { font-family: var(--display); font-weight: 400; color: var(--gold); font-size: clamp(1.8rem, 3vw, 3rem); letter-spacing: 0; }
+.hidden-board { flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; opacity: .35; }
+.ghost-card { border: 3px dashed rgba(255,255,255,.35); border-radius: 14px; display: grid; place-items: center; font-family: var(--display); font-size: 2rem; }
+.status { min-height: 0; }
+.status-big { font-family: var(--display); font-size: clamp(1.6rem, 3vw, 3.2rem); text-align: center; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .3em .5em; }
+.status-mid { font-size: clamp(1.1rem, 2vw, 1.9rem); font-weight: 600; text-align: center; }
+.sharp { width: 100%; font-family: var(--body); font-size: clamp(1rem, 1.5vw, 1.4rem); color: var(--muted); font-weight: 500; }
+
+.score-box { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border-radius: 22px; border: 3px solid var(--team, var(--line)); background: rgba(13,33,96,.65); padding: 16px 10px; text-align: center; transition: transform .3s, box-shadow .3s; min-width: 0; }
+.score-name { font-family: var(--display); font-size: clamp(1.1rem, 2vw, 2.1rem); color: var(--team, white); }
+.score-num { font-family: var(--display); font-size: clamp(3rem, 7vw, 7.5rem); line-height: 1; }
+.score-members { color: var(--muted); font-size: clamp(.8rem, 1vw, 1rem); overflow-wrap: anywhere; }
+.score-box.in-control, .solo-scores li.in-control { box-shadow: 0 0 0 4px var(--team, var(--gold)), 0 0 50px var(--team, var(--gold)); transform: scale(1.03); }
+.score-box.stealing, .solo-scores li.stealing { box-shadow: 0 0 0 4px var(--red), 0 0 50px var(--red); }
+.solo-scores { background: rgba(13,33,96,.65); border: 2px solid var(--line); border-radius: 22px; padding: 14px; overflow: auto; min-width: 0; }
+.solo-scores h3 { font-size: 1.6rem; color: var(--gold); margin-bottom: 8px; }
+.solo-scores ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.solo-scores li { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); font-weight: 700; font-size: clamp(1rem, 1.5vw, 1.5rem); }
+.solo-scores li b, .score-table b { font-family: var(--display); font-weight: 400; color: var(--gold); font-variant-numeric: tabular-nums; }
+
+.faceoff-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; }
+.face-slot { border: 3px solid var(--team, var(--line)); background: rgba(13,33,96,.7); color: white; border-radius: 20px; padding: 12px 16px; display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; transition: transform .25s, opacity .25s, box-shadow .25s; min-width: 0; }
+.face-slot:disabled { cursor: default; }
+.face-name { font-family: var(--display); font-size: clamp(1.6rem, 3vw, 3rem); overflow-wrap: anywhere; }
+.face-team { color: var(--team, var(--muted)); font-weight: 700; }
+.face-hint { color: var(--muted); font-size: .9rem; }
+.face-slot.won { box-shadow: 0 0 0 5px var(--gold), 0 0 60px var(--gold); transform: scale(1.05); }
+.face-slot.lost { opacity: .5; transform: scale(.95); }
+.face-slot.answering { animation: bob 1.2s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(-5px) scale(1.05); } }
+.vs { font-family: var(--display); font-size: clamp(1.4rem, 2.6vw, 2.8rem); text-align: center; }
+.buzz-first { font-size: clamp(1.6rem, 3vw, 3.2rem); animation: pop .5s cubic-bezier(.3,1.6,.5,1) both; }
+.locked { font-family: var(--body); font-size: clamp(.9rem, 1.3vw, 1.2rem); color: var(--muted); text-transform: uppercase; letter-spacing: .12em; font-weight: 700; }
+
+.strikes { display: inline-flex; gap: .2em; }
+.strike-dot { font-family: var(--body); font-weight: 800; font-size: .9em; width: 1.5em; height: 1.5em; display: inline-grid; place-items: center; border-radius: 10px; border: 3px solid rgba(255,255,255,.25); color: rgba(255,255,255,.2); }
+.strike-dot.on { border-color: var(--red); background: var(--red); color: white; }
+.strike-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; gap: 3vw; pointer-events: none; background: rgba(120,0,10,.25); animation: fadeout 1.4s ease forwards; }
+.strike-x { font-family: var(--body); font-weight: 800; font-size: min(40vw, 40vh); line-height: 1; color: var(--red); -webkit-text-stroke: 6px white; text-shadow: 0 10px 40px rgba(0,0,0,.6); animation: xin .35s cubic-bezier(.3,1.8,.5,1) both; }
+@keyframes xin { from { transform: scale(2.4); opacity: 0; } }
+@keyframes fadeout { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+
+.host-controls { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; padding: 12px; border-radius: 20px; background: rgba(0,0,0,.3); border: 2px solid var(--line); }
+.note { font-size: clamp(1rem, 1.5vw, 1.4rem); font-weight: 600; }
+.pick-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: center; }
+.pick-label { font-family: var(--display); font-size: 1.6rem; color: var(--gold); }
+.custom-q { display: flex; gap: 8px; flex: 1 1 360px; max-width: 620px; }
+.custom-q .btn { white-space: nowrap; }
+.custom-q .input { font-size: 1.05rem; padding: .6em .8em; }
+.survey-status { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.countdown { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; }
+.count-num { font-family: var(--display); font-size: 3.5rem; color: var(--gold); line-height: 1; font-variant-numeric: tabular-nums; }
+.countdown.big .count-num { font-size: clamp(4rem, 9vw, 8rem); }
+.count-bar { width: min(560px, 90%); height: 12px; border-radius: 999px; background: rgba(255,255,255,.15); overflow: hidden; }
+.count-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--gold-deep), var(--gold)); transition: width .2s linear; }
+.score-table { width: min(720px, 100%); margin: 0 auto; }
+.score-table h2 { font-size: clamp(2rem, 3.5vw, 3.4rem); color: var(--gold); text-align: center; margin-bottom: 12px; }
+.score-table ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.score-table li { display: grid; grid-template-columns: 2.2em 1fr auto; align-items: center; gap: 10px; background: rgba(255,255,255,.08); border-radius: 14px; padding: 10px 16px; font-weight: 700; font-size: clamp(1.1rem, 2vw, 2rem); }
+.score-table .nm { min-width: 0; overflow-wrap: anywhere; }
+.score-table .rank { font-family: var(--display); color: var(--sky); font-weight: 400; }
+.score-table.inline li { font-size: 1.1rem; padding: 8px 12px; }
+.round-scores { display: none; }
+
+.final-main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; position: relative; z-index: 2; }
+.winner { font-size: clamp(3rem, 9vw, 8rem); color: var(--gold); text-shadow: 0 6px 0 var(--gold-deep), 0 16px 40px rgba(0,0,0,.5); animation: pop .8s cubic-bezier(.3,1.6,.5,1) both; }
+.final-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; width: min(560px, 100%); }
+.final-list li { display: flex; justify-content: space-between; padding: 10px 18px; border-radius: 14px; background: rgba(255,255,255,.08); font-weight: 700; font-size: clamp(1.1rem, 2vw, 1.8rem); }
+.final-list li.top { background: var(--gold); color: var(--ink); }
+.final-list b { font-family: var(--display); font-weight: 400; }
+.confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+.phone-main, .phone-header, .phone-footer, .host-header { position: relative; z-index: 2; }
+
+/* Phone */
+.phone { max-width: 560px; margin: 0 auto; width: 100%; gap: 12px; }
+.phone-header, .phone-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.brand-sm { font-size: 1.5rem; color: var(--gold); }
+.phone-main { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+.phone-card { background: linear-gradient(180deg, rgba(31,79,209,.4), rgba(13,33,96,.8)); border: 2px solid var(--line); border-radius: 24px; padding: 22px; display: flex; flex-direction: column; gap: 14px; text-align: center; }
+.phone-card.hot { border-color: var(--gold); box-shadow: 0 0 40px rgba(245,197,66,.35); }
+.phone-q { font-weight: 700; font-size: 1.15rem; color: var(--muted); text-wrap: balance; }
+.phone-q.big { font-family: var(--display); font-weight: 400; color: white; font-size: 1.8rem; }
+.guess-form { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+.team-pick { border: 3px solid var(--team); background: rgba(0,0,0,.2); color: var(--team); font-family: var(--display); font-size: 1.8rem; padding: 18px; border-radius: 18px; cursor: pointer; }
+.team-pick.on { background: var(--team); color: var(--ink); }
+.team-badge { align-self: center; font-family: var(--display); font-size: 1.5rem; padding: 6px 18px; border-radius: 999px; background: var(--team); color: var(--ink); }
+.buzz-wrap { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+.buzz-btn {
+  width: min(78vw, 58vh, 380px); aspect-ratio: 1; max-width: 100%; border-radius: 50%; border: 0; cursor: pointer;
+  font-family: var(--display); font-size: clamp(3rem, 16vw, 5.5rem); color: rgba(255,255,255,.55);
+  background: radial-gradient(circle at 40% 30%, #6d7da8, #34406a 70%);
+  box-shadow: 0 14px 0 #1c2444, 0 24px 50px rgba(0,0,0,.5), inset 0 -10px 30px rgba(0,0,0,.3);
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; transition: transform .08s, box-shadow .08s;
+}
+.buzz-btn.live { color: var(--ink); background: radial-gradient(circle at 40% 30%, #fff3b8, var(--gold) 55%, var(--gold-deep)); box-shadow: 0 14px 0 #8a5f08, 0 0 80px rgba(245,197,66,.8), inset 0 -10px 30px rgba(0,0,0,.2); animation: glow 0.9s ease-in-out infinite; }
+.buzz-btn:active, .buzz-btn.pressed { transform: translateY(10px); box-shadow: 0 4px 0 #1c2444, 0 10px 20px rgba(0,0,0,.5); }
+.buzz-btn.pressed { color: white; background: radial-gradient(circle at 40% 30%, #8fb2ff, var(--blue) 60%); }
+.buzz-btn.nope { animation: shake .4s; }
+@keyframes glow { 50% { box-shadow: 0 14px 0 #8a5f08, 0 0 120px rgba(245,197,66,1), inset 0 -10px 30px rgba(0,0,0,.2); } }
+@keyframes shake { 20%, 60% { transform: translateX(-12px); } 40%, 80% { transform: translateX(12px); } }
+.buzz-outcome { border-radius: 28px; padding: 40px 20px; text-align: center; display: flex; flex-direction: column; gap: 14px; animation: pop .5s cubic-bezier(.3,1.6,.5,1) both; }
+.buzz-outcome.won { background: radial-gradient(circle at 50% 30%, #fff3b8, var(--gold) 60%, var(--gold-deep)); color: var(--ink); }
+.buzz-outcome.lost { background: rgba(255,255,255,.08); border: 2px solid var(--line); }
+.outcome-title { font-size: clamp(2.6rem, 13vw, 4.5rem); }
+
+@media (max-width: 900px) {
+  .host { height: auto; overflow: visible; }
+  .lobby { grid-template-columns: 1fr; }
+  .game.teams, .game.solo { grid-template-columns: 1fr 1fr; }
+  .game .stage { grid-column: 1 / -1; order: -1; }
+  .board { grid-template-columns: 1fr; grid-auto-flow: row !important; grid-template-rows: none !important; }
+  .faceoff-row { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script>
+(() => {
+  // src/questions.js
+  var QUESTIONS = [
+    { q: "Name something Zaide always falls asleep during", a: [["The news", 26], ["A movie", 22], ["Someone's long story", 18], ["The dreidel game", 12], ["Dinner", 9], ["His own story", 7], ["Candle lighting", 6]] },
+    { q: "Name a topping people put on latkes", a: [["Applesauce", 38], ["Sour cream", 30], ["Ketchup", 10], ["Sugar", 8], ["Salt", 6], ["Smoked salmon", 5], ["Cheese", 3]] },
+    { q: "Name something Bubby says the moment you walk in the door", a: [["Eat something!", 34], ["You got so big!", 25], ["You're too thin", 15], ["Where's your coat?", 11], ["Give me a kiss", 9], ["Finally!", 6]] },
+    { q: "Name something you can win in a game of dreidel", a: [["Gelt", 42], ["Candy", 20], ["Pennies", 14], ["Bragging rights", 10], ["Nuts", 6], ["Raisins", 5], ["Nothing", 3]] },
+    { q: "Name a smell coming from the kitchen at a Hanukkah party", a: [["Frying oil", 35], ["Burnt latkes", 24], ["Onions", 16], ["Doughnuts", 11], ["Candle smoke", 8], ["Brisket", 6]] },
+    { q: "Name something the uncles argue about at the table", a: [["Sports", 30], ["Politics", 24], ["The best way to drive here", 15], ["Who pays", 12], ["Whose latkes are best", 10], ["The thermostat", 9]] },
+    { q: "Name something the loud kids are doing while the grown-ups talk", a: [["Running around", 32], ["Screaming", 22], ["Spinning dreidels", 16], ["Eating the gelt", 12], ["Hiding under the table", 10], ["Playing on a phone", 8]] },
+    { q: "Name a reason there are way too many sufganiyot", a: [["Bubby made extra", 30], ["Everyone brought some", 26], ["Nobody can count", 14], ["They were on sale", 12], ["Just in case", 10], ["Uncle bought a dozen dozen", 8]] },
+    { q: "Name something people do when a relative brings up politics at the table", a: [["Change the subject", 30], ["Pass the latkes", 24], ["Escape to the kitchen", 16], ["Turn up the music", 11], ["Start singing", 10], ["Pretend to take a call", 9]] },
+    { q: "Name something that ends up covered in powdered sugar", a: [["Your shirt", 32], ["Your face", 25], ["The kids", 15], ["The table", 12], ["The dog", 9], ["Zaide's beard", 7]] },
+    { q: "Name something you need to make latkes", a: [["Potatoes", 40], ["Oil", 25], ["Onions", 14], ["Eggs", 10], ["A grater", 7], ["Patience", 4]] },
+    { q: "Name a sign the latkes stayed in the pan too long", a: [["The smoke alarm", 34], ["Black edges", 26], ["The smell", 18], ["Extra crunch", 10], ["Bubby's face", 7], ["Everyone opens windows", 5]] },
+    { q: "Name something Bubby packs your leftovers in", a: [["Foil", 40], ["Plastic wrap", 22], ["An old margarine tub", 15], ["Napkins", 10], ["A zip bag", 8], ["A yogurt container", 5]] },
+    { q: "Name something that can go wrong with the menorah", a: [["Wax drips everywhere", 30], ["Candles fall over", 22], ["Run out of candles", 16], ["Forget which night it is", 13], ["Light them in the wrong order", 11], ["The shamash goes out", 8]] },
+    { q: "Name a song people sing at a Hanukkah party", a: [["Ma'oz Tzur", 32], ["I Have a Little Dreidel", 28], ["Sevivon", 14], ["Oh Chanukah", 12], ["The blessings", 8], ["Happy Birthday", 6]] },
+    { q: "Name an excuse for eating a fifth latke", a: [["It's only once a year", 30], ["They're small", 22], ["Bubby will be hurt", 18], ["I skipped lunch", 12], ["It's tradition", 10], ["Potatoes are a vegetable", 8]] },
+    { q: "Name something a kid would buy with Hanukkah gelt money", a: [["Candy", 34], ["Toys", 26], ["Video games", 12], ["More gelt", 12], ["Slime", 9], ["A new dreidel", 7]] },
+    { q: "Name something Zaide does right after a big meal", a: [["Takes a nap", 38], ["Loosens his belt", 22], ["Tells a story", 15], ["Asks for tea", 10], ["Watches TV", 9], ["Asks about dessert", 6]] },
+    { q: "Name something everyone fights over at the party", a: [["The last sufganiyah", 30], ["The crispiest latke", 25], ["The comfy seat", 15], ["The remote", 12], ["Who lights the candles", 10], ["The gelt", 8]] },
+    { q: "Name a gift you might get on the fifth night of Hanukkah", a: [["Socks", 34], ["A book", 20], ["Pajamas", 16], ["A gift card", 12], ["Gelt", 10], ["A sweater", 8]] },
+    { q: "Name something you'd find on the table at a Hanukkah party", a: [["Latkes", 30], ["The menorah", 22], ["Applesauce", 15], ["Dreidels", 12], ["Gelt", 10], ["Sufganiyot", 7], ["Brisket", 4]] }
+  ];
+
+  // src/logic.js
+  var rid = () => Math.random().toString(36).slice(2, 10);
+  var CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  var makeCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join("");
+  var clean = (s, max = 40) => String(s != null ? s : "").replace(/[\u0000-\u001f\u007f​-‏‪-‮]/g, "").replace(/\s+/g, " ").trim().slice(0, max);
+  var STOP = /* @__PURE__ */ new Set(["a", "an", "the", "my", "his", "her", "their", "some", "of", "to", "and"]);
+  function singular(w) {
+    if (w.length <= 3) return w;
+    if (w.endsWith("ies")) return w.slice(0, -3) + "y";
+    if (/(ches|shes|sses|xes|zes|oes)$/.test(w)) return w.slice(0, -2);
+    if (w.endsWith("s") && !w.endsWith("ss") && !w.endsWith("us")) return w.slice(0, -1);
+    return w;
+  }
+  function norm(s) {
+    const words = String(s != null ? s : "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/['’`]/g, "").replace(/[^a-z0-9֐-׿ ]+/g, " ").split(/\s+/).filter(Boolean);
+    const kept = words.filter((w) => !STOP.has(w));
+    return (kept.length ? kept : words).map(singular).join(" ").trim();
+  }
+  function lev(a, b) {
+    if (a === b) return 0;
+    const m = a.length, n = b.length;
+    if (!m) return n;
+    if (!n) return m;
+    let prev = Array.from({ length: n + 1 }, (_, i) => i);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) {
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+      prev = cur;
+    }
+    return prev[n];
+  }
+  function similar(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const A = a.replace(/ /g, ""), B = b.replace(/ /g, "");
+    if (A === B) return true;
+    const L = Math.max(A.length, B.length);
+    const allowed = L <= 3 ? 0 : L <= 7 ? 1 : 2;
+    return lev(A, B) <= allowed;
+  }
+  function guessMatches(guess, answer) {
+    const g = norm(guess), a = norm(answer);
+    if (!g || !a) return false;
+    if (similar(g, a)) return true;
+    if (a.length >= 4 && ` ${g} `.includes(` ${a} `)) return true;
+    if (g.length >= 4 && ` ${a} `.includes(` ${g} `)) return true;
+    return false;
+  }
+  function buildSurveyBoard(texts, max = 7) {
+    const groups = [];
+    texts.forEach((raw, order) => {
+      const t = clean(raw, 32);
+      const n = norm(t);
+      if (!n) return;
+      let g = groups.find((x) => similar(x.key, n));
+      if (!g) {
+        g = { key: n, count: 0, order, spell: {} };
+        groups.push(g);
+      }
+      g.count++;
+      const k = t.toLowerCase();
+      g.spell[k] = g.spell[k] || { t, c: 0 };
+      g.spell[k].c++;
+    });
+    groups.sort((x, y) => y.count - x.count || x.order - y.order);
+    return groups.slice(0, max).map((g) => {
+      const best = Object.values(g.spell).sort((x, y) => y.c - x.c)[0].t;
+      return { t: best.charAt(0).toUpperCase() + best.slice(1), p: g.count * 10, n: g.count, r: false };
+    });
+  }
+
+  // src/app.jsx
+  var { useState, useEffect, useRef, useMemo, useCallback } = React;
+  var store = (kind) => ({
+    get(k) {
+      try {
+        return window[kind].getItem(k);
+      } catch (e) {
+        return null;
+      }
+    },
+    set(k, v) {
+      try {
+        window[kind].setItem(k, v);
+      } catch (e) {
+      }
+    },
+    del(k) {
+      try {
+        window[kind].removeItem(k);
+      } catch (e) {
+      }
+    }
+  });
+  var local = store("localStorage");
+  var session = store("sessionStorage");
+  var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  var clone = (o) => JSON.parse(JSON.stringify(o));
+  function myPid() {
+    let p = session.get("lf-pid");
+    if (!p) {
+      p = "p" + rid();
+      session.set("lf-pid", p);
+    }
+    return p;
+  }
+  var Sound = {
+    ctx: null,
+    on: local.get("lf-sound") !== "off",
+    ensure() {
+      try {
+        if (!this.ctx) {
+          const C = window.AudioContext || window.webkitAudioContext;
+          if (C) this.ctx = new C();
+        }
+        if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
+      } catch (e) {
+      }
+      return this.ctx;
+    },
+    tone(freq, dur, type = "sine", vol = 0.25, when = 0, to) {
+      if (!this.on) return;
+      const c = this.ensure();
+      if (!c) return;
+      const t = c.currentTime + when;
+      const o = c.createOscillator();
+      const g = c.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, t);
+      if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
+      g.gain.setValueAtTime(1e-4, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(1e-4, t + dur);
+      o.connect(g).connect(c.destination);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    },
+    ding() {
+      this.tone(988, 0.9, "triangle", 0.4);
+      this.tone(1480, 1.1, "sine", 0.25, 0.09);
+      this.tone(1976, 0.7, "sine", 0.12, 0.18);
+    },
+    flip() {
+      this.tone(523, 0.12, "square", 0.1);
+      this.tone(784, 0.18, "triangle", 0.22, 0.07);
+      this.tone(1047, 0.35, "triangle", 0.2, 0.14);
+    },
+    strike() {
+      this.tone(150, 0.7, "sawtooth", 0.28, 0, 110);
+      this.tone(155, 0.7, "square", 0.12, 0, 112);
+    },
+    win() {
+      [523, 659, 784, 1047, 784, 1047].forEach((f, i) => this.tone(f, 0.3, "triangle", 0.25, i * 0.11));
+    },
+    fanfare() {
+      [392, 523, 659, 784, 659, 784, 1047].forEach((f, i) => this.tone(f, i === 6 ? 1.2 : 0.28, "triangle", 0.28, i * 0.16));
+    },
+    tick() {
+      this.tone(1200, 0.05, "square", 0.05);
+    },
+    buzz() {
+      this.tone(330, 0.25, "square", 0.2, 0, 440);
+    }
+  };
+  var TEAMS = {
+    A: { name: "Team Latke", cls: "team-a" },
+    B: { name: "Team Sufganiyah", cls: "team-b" }
+  };
+  var SURVEY_MS = 3e4;
+  var fx = (kind, extra = {}) => ({ k: rid(), kind, t: Date.now(), ...extra });
+  function newGame(code) {
+    return {
+      v: 1,
+      code,
+      rev: 0,
+      createdAt: Date.now(),
+      hostTs: Date.now(),
+      phase: "lobby",
+      settings: { rounds: 6, mode: "teams", teamPick: "host" },
+      roster: {},
+      assign: {},
+      kicked: {},
+      scores: {},
+      played: {},
+      usedQ: [],
+      roundNo: 0,
+      roundKey: null,
+      question: "",
+      source: "",
+      fallbackQ: null,
+      board: [],
+      bank: 0,
+      strikes: 0,
+      control: null,
+      controlPid: null,
+      stealSide: null,
+      face: null,
+      buzz: null,
+      survey: null,
+      fx: null,
+      last: null,
+      sharp: [],
+      note: ""
+    };
+  }
+  var activeIds = (s) => Object.keys(s.roster || {}).filter((p) => {
+    var _a;
+    return !((_a = s.kicked) == null ? void 0 : _a[p]);
+  });
+  var teamOf = (s, pid) => {
+    var _a, _b, _c;
+    return ((_a = s.assign) == null ? void 0 : _a[pid]) || ((_c = (_b = s.roster) == null ? void 0 : _b[pid]) == null ? void 0 : _c.team) || null;
+  };
+  var nameOf = (s, pid) => {
+    var _a, _b;
+    return ((_b = (_a = s.roster) == null ? void 0 : _a[pid]) == null ? void 0 : _b.name) || "Someone";
+  };
+  var sideOf = (s, pid) => s.settings.mode === "teams" ? teamOf(s, pid) || "A" : pid;
+  var sideName = (s, side) => {
+    var _a;
+    return s.settings.mode === "teams" ? ((_a = TEAMS[side]) == null ? void 0 : _a.name) || "A team" : nameOf(s, side);
+  };
+  function otherSide(s, side) {
+    if (s.settings.mode === "teams") return side === "A" ? "B" : "A";
+    const f = s.face || {};
+    return side === f.p1 ? f.p2 : f.p1;
+  }
+  function sides(s) {
+    if (s.settings.mode === "teams") return ["A", "B"];
+    return activeIds(s);
+  }
+  function standings(s) {
+    return sides(s).map((side) => {
+      var _a;
+      return { side, name: sideName(s, side), score: ((_a = s.scores) == null ? void 0 : _a[side]) || 0 };
+    }).sort((a, b) => b.score - a.score);
+  }
+  function balanceTeams(s) {
+    const ids = activeIds(s);
+    const count = { A: 0, B: 0 };
+    ids.forEach((p) => {
+      const t = teamOf(s, p);
+      if (t) count[t]++;
+    });
+    ids.forEach((p) => {
+      if (!teamOf(s, p)) {
+        const t = count.A <= count.B ? "A" : "B";
+        s.assign[p] = t;
+        count[t]++;
+      }
+    });
+  }
+  function shuffle(a) {
+    const x = a.slice();
+    for (let i = x.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [x[i], x[j]] = [x[j], x[i]];
+    }
+    return x;
+  }
+  function leastPlayed(s, ids) {
+    return shuffle(ids).sort((a, b) => (s.played[a] || 0) - (s.played[b] || 0));
+  }
+  function pickFaceoff(s) {
+    const ids = activeIds(s);
+    if (s.settings.mode === "teams") {
+      const a = leastPlayed(s, ids.filter((p) => teamOf(s, p) === "A"));
+      const b = leastPlayed(s, ids.filter((p) => teamOf(s, p) === "B"));
+      if (a.length && b.length) return [a[0], b[0]];
+    }
+    const all = leastPlayed(s, ids);
+    return [all[0] || null, all[1] || null];
+  }
+  function setupFaceoff(s) {
+    const [p1, p2] = pickFaceoff(s);
+    [p1, p2].forEach((p) => {
+      if (p) s.played[p] = (s.played[p] || 0) + 1;
+    });
+    s.face = { p1, p2, stage: "ready", first: null, answering: null };
+    s.buzz = { id: rid(), open: false, winner: null, times: null };
+    s.phase = "faceoff";
+  }
+  function pickQuestion(s) {
+    let free = QUESTIONS.map((_, i) => i).filter((i) => !s.usedQ.includes(i));
+    if (!free.length) {
+      s.usedQ = [];
+      free = QUESTIONS.map((_, i) => i);
+    }
+    const idx = free[Math.floor(Math.random() * free.length)];
+    s.usedQ.push(idx);
+    return idx;
+  }
+  function beginRound(s, kind, customText) {
+    s.roundNo += 1;
+    s.roundKey = rid();
+    Object.assign(s, { bank: 0, strikes: 0, control: null, controlPid: null, stealSide: null, last: null, sharp: [], note: "" });
+    if (kind === "custom") {
+      s.question = clean(customText, 120);
+      s.fallbackQ = null;
+    } else {
+      const idx = pickQuestion(s);
+      s.question = QUESTIONS[idx].q;
+      s.fallbackQ = idx;
+    }
+    s.source = kind;
+    if (kind === "builtin") {
+      s.board = QUESTIONS[s.fallbackQ].a.map(([t, p]) => ({ t, p, r: false }));
+      setupFaceoff(s);
+    } else {
+      s.board = [];
+      s.face = null;
+      s.buzz = null;
+      s.survey = { id: rid(), endsAt: Date.now() + SURVEY_MS, done: false, empty: false };
+      s.phase = "survey";
+    }
+  }
+  function giveControl(s, pid) {
+    s.control = sideOf(s, pid);
+    s.controlPid = pid;
+    s.strikes = 0;
+    s.phase = "round";
+    s.face.stage = "done";
+    s.note = `${sideName(s, s.control)} has control`;
+  }
+  function allRevealed(s) {
+    return s.board.length > 0 && s.board.every((c) => c.r);
+  }
+  function endRound(s, side, how, players) {
+    s.scores[side] = (s.scores[side] || 0) + s.bank;
+    s.last = { side, pts: s.bank, how };
+    s.board.forEach((c) => {
+      if (!c.r) {
+        c.r = true;
+        c.late = true;
+      }
+    });
+    s.phase = "roundEnd";
+    s.buzz = s.buzz ? { ...s.buzz, open: false } : null;
+    const sharp = [];
+    Object.values(players || {}).forEach((rec) => {
+      var _a, _b;
+      if (!rec || ((_a = s.kicked) == null ? void 0 : _a[rec.pid]) || ((_b = rec.guess) == null ? void 0 : _b.id) !== s.roundKey) return;
+      if (s.board.some((c) => guessMatches(rec.guess.text, c.t))) sharp.push(nameOf(s, rec.pid));
+    });
+    s.sharp = sharp.slice(0, 12);
+    s.fx = fx("win");
+  }
+  function useCapabilities() {
+    const [st, setSt] = useState({ loading: true, db: null, room: null });
+    useEffect(() => {
+      let alive = true;
+      (async () => {
+        for (let i = 0; i < 40 && !(window.claude && typeof window.claude.use === "function"); i++) await sleep(100);
+        if (!(window.claude && typeof window.claude.use === "function")) {
+          if (alive) setSt({ loading: false, db: null, room: null });
+          return;
+        }
+        const [db, room] = await Promise.all([
+          window.claude.use("db").catch(() => null),
+          window.claude.use("room").catch(() => null)
+        ]);
+        if (alive) setSt({ loading: false, db, room });
+      })();
+      return () => {
+        alive = false;
+      };
+    }, []);
+    return st;
+  }
+  function useWriter(ref, onError) {
+    const q = useRef({ busy: false, pending: null });
+    return useCallback((value) => {
+      q.current.pending = value;
+      if (q.current.busy || !ref) return;
+      q.current.busy = true;
+      (async () => {
+        while (q.current.pending) {
+          const v = q.current.pending;
+          q.current.pending = null;
+          try {
+            await ref.set({ ...v, hostTs: Date.now() });
+            onError && onError(null);
+          } catch (e) {
+            const code = (e == null ? void 0 : e.code) || "unavailable";
+            onError && onError(code);
+            if (code === "unavailable" || code === "resource_exhausted") {
+              await sleep(code === "unavailable" ? 500 + Math.random() * 500 : 1500);
+              if (!q.current.pending) q.current.pending = v;
+            }
+          }
+        }
+        q.current.busy = false;
+      })();
+    }, [ref]);
+  }
+  function useRoomState(db, code, fast) {
+    const [state, setState] = useState(null);
+    const [status, setStatus] = useState("loading");
+    const best = useRef(null);
+    const offset = useRef(null);
+    const accept = useCallback((snap) => {
+      var _a, _b;
+      if (!snap) return;
+      if (!snap.exists) {
+        if (!best.current && !((_a = snap.metadata) == null ? void 0 : _a.fromCache)) setStatus("missing");
+        return;
+      }
+      const d = snap.data();
+      if (!d) return;
+      if (!((_b = snap.metadata) == null ? void 0 : _b.fromCache) && typeof d.hostTs === "number") {
+        const o = d.hostTs - Date.now();
+        if (offset.current === null || o > offset.current) offset.current = o;
+      }
+      if (!best.current || (d.rev || 0) > (best.current.rev || 0)) {
+        best.current = d;
+        setState(d);
+        setStatus("ok");
+      }
+    }, []);
+    useEffect(() => {
+      if (!db || !code) return;
+      best.current = null;
+      setState(null);
+      setStatus("loading");
+      const ref = db.doc("rooms/" + code);
+      const timer = setTimeout(() => {
+        if (!best.current) setStatus((s) => s === "loading" ? "slow" : s);
+      }, 1e4);
+      const unsub = ref.onSnapshot(accept, () => {
+      });
+      return () => {
+        clearTimeout(timer);
+        unsub();
+      };
+    }, [db, code, accept]);
+    useEffect(() => {
+      if (!db || !code) return;
+      const ref = db.doc("rooms/" + code);
+      let alive = true;
+      (async () => {
+        while (alive) {
+          try {
+            accept(await ref.get());
+          } catch (e) {
+            if ((e == null ? void 0 : e.code) === "resource_exhausted") await sleep(3e3);
+          }
+          await sleep(fast ? 300 : 1e3);
+        }
+      })();
+      return () => {
+        alive = false;
+      };
+    }, [db, code, fast, accept]);
+    const hostNow = useCallback(() => Date.now() + (offset.current || 0), []);
+    return { state, status, hostNow };
+  }
+  function usePlayers(db, room, code, fast) {
+    const [players, setPlayers] = useState({});
+    const map = useRef({});
+    const mergeRec = useCallback((rec) => {
+      if (!rec || typeof rec.pid !== "string" || !/^p[a-z0-9]{4,12}$/.test(rec.pid)) return false;
+      const cur = map.current[rec.pid];
+      if (cur && (cur.v || 0) >= (rec.v || 0)) return false;
+      map.current = { ...map.current, [rec.pid]: rec };
+      return true;
+    }, []);
+    const acceptMany = useCallback((recs) => {
+      let changed = false;
+      recs.forEach((r) => {
+        if (mergeRec(r)) changed = true;
+      });
+      if (changed) setPlayers(map.current);
+    }, [mergeRec]);
+    const fastRef = useRef(fast);
+    fastRef.current = fast;
+    useEffect(() => {
+      if (!db || !code) return;
+      const col = db.collection("rooms/" + code + "/players");
+      const unsub = col.onSnapshot((qs) => acceptMany(qs.docs.map((d) => d.data())), () => {
+      });
+      let alive = true;
+      (async () => {
+        while (alive) {
+          try {
+            const qs = await col.get();
+            acceptMany(qs.docs.map((d) => d.data()));
+          } catch (e) {
+            if ((e == null ? void 0 : e.code) === "resource_exhausted") await sleep(3e3);
+          }
+          await sleep(fastRef.current ? 300 : 1e3);
+        }
+      })();
+      return () => {
+        alive = false;
+        unsub();
+      };
+    }, [db, code, acceptMany]);
+    useEffect(() => {
+      if (!room || !code) return;
+      const read = (peers) => acceptMany(peers.map((p) => {
+        var _a, _b;
+        return ((_b = (_a = p.presence) == null ? void 0 : _a.ff) == null ? void 0 : _b.code) === code ? p.presence.ff.rec : null;
+      }).filter(Boolean));
+      const unsub = room.onPeers((ch) => read(ch.peers), () => {
+      });
+      return () => unsub();
+    }, [room, code, acceptMany]);
+    return players;
+  }
+  function Menorah({ lit = 0, size = "md" }) {
+    const n = Math.max(0, Math.min(8, lit));
+    const candles = [];
+    for (let i = 0; i < 9; i++) {
+      const shamash = i === 4;
+      const pos = i < 4 ? i : i - 1;
+      const on = shamash ? n > 0 : 7 - pos < n;
+      candles.push(
+        /* @__PURE__ */ React.createElement("div", { key: i, className: "candle" + (shamash ? " shamash" : "") + (on ? " on" : "") }, /* @__PURE__ */ React.createElement("span", { className: "flame" }))
+      );
+    }
+    return /* @__PURE__ */ React.createElement("div", { className: "menorah " + size, "aria-label": `${n} of 8 candles lit` }, /* @__PURE__ */ React.createElement("div", { className: "candles" }, candles), /* @__PURE__ */ React.createElement("div", { className: "menorah-base" }));
+  }
+  function Btn({ children, onClick, kind = "gold", className = "", disabled, big, ...rest }) {
+    return /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        disabled,
+        onClick: (e) => {
+          Sound.ensure();
+          onClick && onClick(e);
+        },
+        className: `btn btn-${kind} ${big ? "btn-big" : ""} ${className}`,
+        ...rest
+      },
+      children
+    );
+  }
+  function BoardCard({ i, card, onTap, canTap, host }) {
+    const revealed = card.r;
+    return /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: `card ${revealed ? "revealed" : ""} ${card.late ? "late" : ""} ${canTap && !revealed ? "tappable" : ""}`,
+        onClick: () => canTap && !revealed && onTap(i),
+        disabled: !canTap || revealed,
+        "aria-label": revealed ? `${card.t}, ${card.p} points` : host && canTap ? `Reveal answer ${i + 1}: ${card.t}` : `Answer ${i + 1}, hidden`
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "card-inner" }, /* @__PURE__ */ React.createElement("span", { className: "card-face card-front" }, /* @__PURE__ */ React.createElement("span", { className: "card-num" }, i + 1), host && canTap ? /* @__PURE__ */ React.createElement("span", { className: "card-peek" }, card.t) : null), /* @__PURE__ */ React.createElement("span", { className: "card-face card-back" }, /* @__PURE__ */ React.createElement("span", { className: "card-text" }, card.t), /* @__PURE__ */ React.createElement("span", { className: "card-pts" }, card.p)))
+    );
+  }
+  function Board({ board, onTap, canTap, host, peek }) {
+    const two = board.length > 4;
+    const rows = two ? Math.ceil(board.length / 2) : board.length;
+    return /* @__PURE__ */ React.createElement("div", { className: "board" + (two ? "" : " compact"), style: { gridTemplateRows: `repeat(${rows}, auto)`, gridAutoFlow: two ? "column" : "row" } }, board.map((c, i) => /* @__PURE__ */ React.createElement(BoardCard, { key: i, i, card: c, onTap, canTap, host: host && peek })));
+  }
+  function StrikeOverlay({ n, k }) {
+    if (!n) return null;
+    return /* @__PURE__ */ React.createElement("div", { className: "strike-overlay", key: k, "aria-live": "assertive", "aria-label": `Strike ${n}` }, Array.from({ length: n }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "strike-x", style: { animationDelay: `${i * 0.06}s` } }, "\u2715")));
+  }
+  function Strikes({ n }) {
+    return /* @__PURE__ */ React.createElement("div", { className: "strikes", "aria-label": `${n} strikes` }, [0, 1, 2].map((i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "strike-dot" + (i < n ? " on" : "") }, "\u2715")));
+  }
+  function Confetti() {
+    const ref = useRef(null);
+    useEffect(() => {
+      const cv = ref.current;
+      if (!cv) return;
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      const ctx = cv.getContext("2d");
+      let w = 0, h = 0, raf = 0, parts = [];
+      const colors = ["#f5c542", "#ffe58a", "#ffffff", "#5b8cff", "#2d5bd8", "#bcd3ff"];
+      const resize = () => {
+        w = cv.width = cv.clientWidth * devicePixelRatio;
+        h = cv.height = cv.clientHeight * devicePixelRatio;
+      };
+      resize();
+      window.addEventListener("resize", resize);
+      const burst = () => {
+        for (let i = 0; i < 140; i++) {
+          parts.push({
+            x: Math.random() * w,
+            y: -20 - Math.random() * h * 0.3,
+            vx: (Math.random() - 0.5) * 3 * devicePixelRatio,
+            vy: (2 + Math.random() * 3) * devicePixelRatio,
+            r: (4 + Math.random() * 6) * devicePixelRatio,
+            a: Math.random() * 6,
+            va: (Math.random() - 0.5) * 0.3,
+            c: colors[Math.random() * colors.length | 0],
+            star: Math.random() < 0.18
+          });
+        }
+      };
+      const star = (x, y, r) => {
+        for (let t = 0; t < 2; t++) {
+          ctx.beginPath();
+          for (let k = 0; k < 3; k++) {
+            const ang = Math.PI * 2 * k / 3 + (t ? Math.PI : 0) - Math.PI / 2;
+            const px = x + Math.cos(ang) * r, py = y + Math.sin(ang) * r;
+            k ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+          }
+          ctx.closePath();
+          ctx.stroke();
+        }
+      };
+      burst();
+      const iv = setInterval(burst, 2600);
+      const step = () => {
+        ctx.clearRect(0, 0, w, h);
+        parts = parts.filter((p) => p.y < h + 40);
+        parts.forEach((p) => {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.a += p.va;
+          p.vx *= 0.995;
+          ctx.save();
+          if (p.star) {
+            ctx.strokeStyle = p.c;
+            ctx.lineWidth = 2 * devicePixelRatio;
+            star(p.x, p.y, p.r * 1.4);
+          } else {
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.a);
+            ctx.fillStyle = p.c;
+            ctx.fillRect(-p.r / 2, -p.r / 4, p.r, p.r / 2);
+          }
+          ctx.restore();
+        });
+        raf = requestAnimationFrame(step);
+      };
+      step();
+      return () => {
+        cancelAnimationFrame(raf);
+        clearInterval(iv);
+        window.removeEventListener("resize", resize);
+      };
+    }, []);
+    return /* @__PURE__ */ React.createElement("canvas", { ref, className: "confetti", "aria-hidden": "true" });
+  }
+  function SoundToggle() {
+    const [on, setOn] = useState(Sound.on);
+    return /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "chip",
+        onClick: () => {
+          Sound.on = !on;
+          setOn(!on);
+          local.set("lf-sound", !on ? "on" : "off");
+          if (!on) {
+            Sound.ensure();
+            Sound.flip();
+          }
+        },
+        "aria-pressed": on
+      },
+      on ? "\u{1F50A} Sound on" : "\u{1F507} Sound off"
+    );
+  }
+  function Countdown({ endsAt, now, big }) {
+    const [, force] = useState(0);
+    useEffect(() => {
+      const t = setInterval(() => force((x) => x + 1), 200);
+      return () => clearInterval(t);
+    }, []);
+    const left = Math.max(0, Math.ceil((endsAt - now()) / 1e3));
+    const frac = Math.max(0, Math.min(1, (endsAt - now()) / SURVEY_MS));
+    return /* @__PURE__ */ React.createElement("div", { className: "countdown" + (big ? " big" : "") }, /* @__PURE__ */ React.createElement("div", { className: "count-num" }, left), /* @__PURE__ */ React.createElement("div", { className: "count-bar" }, /* @__PURE__ */ React.createElement("span", { style: { width: `${frac * 100}%` } })));
+  }
+  function ErrorScreen({ title, children }) {
+    return /* @__PURE__ */ React.createElement("div", { className: "screen center" }, /* @__PURE__ */ React.createElement("div", { className: "panel max-w-xl" }, /* @__PURE__ */ React.createElement("h1", { className: "display text-4xl mb-4 text-[var(--gold)]" }, title), /* @__PURE__ */ React.createElement("div", { className: "space-y-3 text-lg leading-relaxed" }, children)));
+  }
+  function Landing({ db, onHost, onResume, onJoin }) {
+    const hashCode = (location.hash || "").replace("#", "").toUpperCase();
+    const [code, setCode] = useState(/^[A-Z]{4}$/.test(hashCode) ? hashCode : local.get("lf-last-code") || "");
+    const [name, setName] = useState(local.get("lf-name") || "");
+    const [recent, setRecent] = useState([]);
+    const [err, setErr] = useState("");
+    const resumeCode = local.get("lf-host-code");
+    useEffect(() => {
+      let alive = true;
+      db.collection("rooms").where("createdAt", ">", Date.now() - 8 * 3600 * 1e3).limit(20).get().then((qs) => {
+        if (!alive) return;
+        const list = qs.docs.map((d) => d.data()).filter((d) => d && /^[A-Z]{4}$/.test(d.code) && d.phase !== "final").sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 4);
+        setRecent(list);
+      }).catch(() => {
+      });
+      return () => {
+        alive = false;
+      };
+    }, [db]);
+    const submit = (e) => {
+      e.preventDefault();
+      const c = code.trim().toUpperCase();
+      const n = clean(name, 20);
+      if (!/^[A-Z]{4}$/.test(c)) {
+        setErr("The room code is the 4 letters on the TV screen.");
+        return;
+      }
+      if (!n) {
+        setErr("Type your name so everyone knows who buzzed.");
+        return;
+      }
+      local.set("lf-name", n);
+      onJoin(c, n);
+    };
+    return /* @__PURE__ */ React.createElement("div", { className: "screen landing" }, /* @__PURE__ */ React.createElement("div", { className: "landing-inner" }, /* @__PURE__ */ React.createElement("div", { className: "text-center" }, /* @__PURE__ */ React.createElement(Menorah, { lit: 8, size: "lg" }), /* @__PURE__ */ React.createElement("h1", { className: "display title" }, "Latke Feud"), /* @__PURE__ */ React.createElement("p", { className: "tagline" }, "The family says\u2026 and the family is never wrong.")), /* @__PURE__ */ React.createElement("form", { className: "panel join-panel", onSubmit: submit }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl text-[var(--gold)]" }, "Join on your phone"), recent.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-2" }, recent.map((r) => /* @__PURE__ */ React.createElement("button", { type: "button", key: r.code, className: "chip" + (code === r.code ? " chip-on" : ""), onClick: () => setCode(r.code) }, "Game ", r.code))), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Room code"), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        id: "join-code",
+        value: code,
+        onChange: (e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4)),
+        placeholder: "ABCD",
+        autoComplete: "off",
+        autoCapitalize: "characters",
+        inputMode: "text",
+        className: "input code-input"
+      }
+    )), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Your name"), /* @__PURE__ */ React.createElement("input", { id: "join-name", value: name, onChange: (e) => setName(e.target.value.slice(0, 20)), placeholder: "Cousin Dana", autoComplete: "nickname", className: "input" })), err && /* @__PURE__ */ React.createElement("p", { className: "err", role: "alert" }, err), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-gold btn-big w-full", onClick: () => Sound.ensure() }, "Join")), /* @__PURE__ */ React.createElement("div", { className: "panel host-panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl text-white" }, "Host on the big screen"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Open this on the TV or laptop everyone can see. You'll get a room code for the phones."), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3" }, /* @__PURE__ */ React.createElement(Btn, { kind: "blue", big: true, onClick: onHost }, "Host a new game"), resumeCode && /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: () => onResume(resumeCode) }, "Resume game ", resumeCode)))));
+  }
+  function Host({ db, room, code, initial, onExit }) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
+    const [s, setS] = useState(initial);
+    const sRef = useRef(initial);
+    const undoStack = useRef([]);
+    const [syncErr, setSyncErr] = useState(null);
+    const [xs, setXs] = useState(null);
+    const [custom, setCustom] = useState("");
+    const [confirmEnd, setConfirmEnd] = useState(false);
+    const [peek, setPeek] = useState(local.get("lf-peek") !== "off");
+    const docRef = useMemo(() => db.doc("rooms/" + code), [db, code]);
+    const write = useWriter(docRef, setSyncErr);
+    const fast = s.phase === "faceoff" && ((_a = s.face) == null ? void 0 : _a.stage) === "open";
+    const players = usePlayers(db, room, code, fast);
+    const playersRef = useRef(players);
+    playersRef.current = players;
+    useEffect(() => {
+      local.set("lf-host-code", code);
+      write(sRef.current);
+    }, []);
+    const commit = useCallback((fn, opts = {}) => {
+      const prev = sRef.current;
+      const next = clone(prev);
+      fn(next);
+      next.rev = (prev.rev || 0) + 1;
+      if (!opts.noUndo) {
+        undoStack.current.push(prev);
+        if (undoStack.current.length > 40) undoStack.current.shift();
+      }
+      sRef.current = next;
+      setS(next);
+      write(next);
+    }, [write]);
+    const undo = () => {
+      const prev = undoStack.current.pop();
+      if (!prev) return;
+      const next = clone(prev);
+      next.rev = (sRef.current.rev || 0) + 1;
+      next.roster = clone(sRef.current.roster);
+      next.kicked = clone(sRef.current.kicked);
+      next.assign = clone(sRef.current.assign);
+      sRef.current = next;
+      setS(next);
+      write(next);
+    };
+    const played = useRef(new Set(initial.fx ? [initial.fx.k] : []));
+    useEffect(() => {
+      const f = s.fx;
+      if (!f || played.current.has(f.k)) return;
+      played.current.add(f.k);
+      if (f.kind === "strike") {
+        setXs({ n: f.n || 1, k: f.k });
+        setTimeout(() => setXs((x) => x && x.k === f.k ? null : x), 1400);
+      }
+      if (Sound[f.kind]) Sound[f.kind]();
+    }, [s.fx]);
+    useEffect(() => {
+      const cur = sRef.current;
+      const updates = {}, leaving = [], back = [];
+      Object.values(players).forEach((rec) => {
+        if (!rec || rec.code !== code) return;
+        const k = cur.kicked[rec.pid];
+        if (rec.left) {
+          if (cur.roster[rec.pid] && !k) leaving.push([rec.pid, rec.v || 1]);
+          return;
+        }
+        if (k) {
+          if ((rec.v || 0) > k) back.push(rec.pid);
+          else return;
+        }
+        const name = clean(rec.name, 20) || "Someone";
+        const team = rec.team === "A" || rec.team === "B" ? rec.team : null;
+        const have = cur.roster[rec.pid];
+        if (!have || have.name !== name || (have.team || null) !== team) updates[rec.pid] = { name, team, at: (have == null ? void 0 : have.at) || Date.now() };
+      });
+      if (!Object.keys(updates).length && !leaving.length && !back.length) return;
+      commit((d) => {
+        Object.assign(d.roster, updates);
+        leaving.forEach(([p, v]) => {
+          d.kicked[p] = v;
+        });
+        back.forEach((p) => {
+          delete d.kicked[p];
+        });
+        if (d.phase !== "lobby" && d.settings.mode === "teams") balanceTeams(d);
+      }, { noUndo: true });
+    }, [players]);
+    const buzzSeen = useRef({ id: null, first: 0 });
+    const lastTick = useRef(0);
+    useEffect(() => {
+      const iv = setInterval(() => {
+        var _a2, _b2;
+        const st2 = sRef.current;
+        if (st2.phase === "survey" && st2.survey && !st2.survey.done) {
+          const left = st2.survey.endsAt - Date.now();
+          const sec = Math.ceil(left / 1e3);
+          if (left > 0 && sec <= 5 && sec !== lastTick.current) {
+            lastTick.current = sec;
+            Sound.tick();
+          }
+          if (left <= 0) finishSurvey();
+        }
+        if (st2.phase === "faceoff" && ((_a2 = st2.face) == null ? void 0 : _a2.stage) === "open" && ((_b2 = st2.buzz) == null ? void 0 : _b2.open)) {
+          const presses = [st2.face.p1, st2.face.p2].map((pid) => {
+            const r = playersRef.current[pid];
+            return r && r.buzz && r.buzz.id === st2.buzz.id && typeof r.buzz.at === "number" ? { pid, at: r.buzz.at } : null;
+          }).filter(Boolean);
+          if (presses.length) {
+            const b = buzzSeen.current;
+            if (b.id !== st2.buzz.id) {
+              b.id = st2.buzz.id;
+              b.first = Date.now();
+            }
+            if (presses.length === 2 || Date.now() - b.first > 700) {
+              presses.sort((x, y) => x.at - y.at);
+              declareBuzz(presses[0].pid, presses);
+            }
+          }
+        }
+      }, 150);
+      return () => clearInterval(iv);
+    }, []);
+    const declareBuzz = (pid, presses) => commit((d) => {
+      if (d.phase !== "faceoff" || !d.face || d.face.stage !== "open" && d.face.stage !== "ready") return;
+      d.buzz.open = false;
+      d.buzz.winner = pid;
+      d.buzz.times = presses ? Object.fromEntries(presses.map((p) => [p.pid, p.at])) : null;
+      d.face.stage = "answer1";
+      d.face.answering = pid;
+      d.fx = fx("ding");
+    });
+    const openBuzzers = () => commit((d) => {
+      d.buzz = { id: rid(), open: true, openedAt: Date.now(), winner: null, times: null };
+      d.face.stage = "open";
+      d.note = "";
+    });
+    const resetBuzzers = () => commit((d) => {
+      d.buzz = { id: rid(), open: false, winner: null, times: null };
+      d.face.stage = "ready";
+      d.face.first = null;
+      d.face.answering = null;
+    });
+    const swapSlot = (slot) => commit((d) => {
+      const f = d.face;
+      const cur = f[slot];
+      const other = slot === "p1" ? f.p2 : f.p1;
+      let pool = activeIds(d).filter((p) => p !== other);
+      if (d.settings.mode === "teams" && cur) {
+        const t = teamOf(d, cur);
+        const same = pool.filter((p) => teamOf(d, p) === t);
+        if (same.length > 1) pool = same;
+      }
+      if (pool.length < 2 && cur) return;
+      pool.sort((a, b) => {
+        var _a2, _b2;
+        return (((_a2 = d.roster[a]) == null ? void 0 : _a2.at) || 0) - (((_b2 = d.roster[b]) == null ? void 0 : _b2.at) || 0);
+      });
+      const next = pool[(pool.indexOf(cur) + 1) % pool.length];
+      if (cur) d.played[cur] = Math.max(0, (d.played[cur] || 1) - 1);
+      d.played[next] = (d.played[next] || 0) + 1;
+      f[slot] = next;
+      d.buzz = { id: rid(), open: false, winner: null, times: null };
+      f.stage = "ready";
+    });
+    const faceAnswer = (idx) => commit((d) => {
+      const f = d.face;
+      const pid = f.answering;
+      let pts = 0;
+      if (idx >= 0 && d.board[idx] && !d.board[idx].r) {
+        d.board[idx].r = true;
+        pts = d.board[idx].p;
+        d.bank += pts;
+        d.fx = fx("flip");
+      } else {
+        idx = -1;
+        d.fx = fx("strike", { n: 1 });
+      }
+      if (f.stage === "answer1") {
+        if (idx === 0 || allRevealed(d)) {
+          giveControl(d, pid);
+          if (allRevealed(d)) endRound(d, d.control, "cleared", playersRef.current);
+          return;
+        }
+        f.first = { pid, idx, pts };
+        f.answering = pid === f.p1 ? f.p2 : f.p1;
+        f.stage = "answer2";
+        d.note = idx < 0 ? `Not on the board! ${nameOf(d, f.answering)}, your turn.` : `${nameOf(d, f.answering)} can beat it with a higher answer.`;
+      } else if (f.stage === "answer2") {
+        const first = f.first || { pts: 0, idx: -1 };
+        if (first.idx < 0 && idx < 0) {
+          f.stage = "ready";
+          f.first = null;
+          f.answering = null;
+          d.buzz = { id: rid(), open: false, winner: null, times: null };
+          d.note = "Both missed. Buzz again!";
+          return;
+        }
+        const winner = pts > first.pts ? pid : first.pid;
+        giveControl(d, winner);
+        if (allRevealed(d)) endRound(d, d.control, "cleared", playersRef.current);
+      }
+    });
+    const roundReveal = (idx) => commit((d) => {
+      if (!d.board[idx] || d.board[idx].r) return;
+      d.board[idx].r = true;
+      d.bank += d.board[idx].p;
+      d.fx = fx("flip");
+      if (allRevealed(d)) endRound(d, d.control, "cleared", playersRef.current);
+    });
+    const roundStrike = () => commit((d) => {
+      d.strikes += 1;
+      d.fx = fx("strike", { n: d.strikes });
+      if (d.strikes >= 3) {
+        d.phase = "steal";
+        d.stealSide = otherSide(d, d.control);
+        d.note = `${sideName(d, d.stealSide)} can steal with one answer`;
+      }
+    });
+    const passControl = () => commit((d) => {
+      d.control = otherSide(d, d.control);
+      d.controlPid = null;
+      d.note = `${sideName(d, d.control)} has control`;
+    });
+    const stealAnswer = (idx) => commit((d) => {
+      if (idx >= 0 && d.board[idx] && !d.board[idx].r) {
+        d.board[idx].r = true;
+        d.bank += d.board[idx].p;
+        endRound(d, d.stealSide, "steal", playersRef.current);
+      } else {
+        endRound(d, d.control, "held", playersRef.current);
+        d.fx = fx("strike", { n: 1 });
+      }
+    });
+    const finishSurvey = (force) => commit((d) => {
+      if (d.phase !== "survey" || !d.survey || d.survey.done && !force) return;
+      const texts = Object.values(playersRef.current).filter((r) => {
+        var _a2;
+        return r && !d.kicked[r.pid] && ((_a2 = r.survey) == null ? void 0 : _a2.id) === d.survey.id && clean(r.survey.text);
+      }).sort((a, b) => (a.survey.at || 0) - (b.survey.at || 0)).map((r) => r.survey.text);
+      const board = buildSurveyBoard(texts);
+      if (!board.length) {
+        d.survey.done = true;
+        d.survey.empty = true;
+        return;
+      }
+      d.survey.done = true;
+      d.survey.count = texts.length;
+      d.board = board;
+      d.fx = fx("ding");
+      setupFaceoff(d);
+    }, { noUndo: true });
+    const extendSurvey = () => commit((d) => {
+      d.survey = { ...d.survey, endsAt: Math.max(Date.now(), d.survey.endsAt) + 15e3, done: false, empty: false };
+    }, { noUndo: true });
+    const useBuiltInBoard = () => commit((d) => {
+      d.board = QUESTIONS[d.fallbackQ].a.map(([t, p]) => ({ t, p, r: false }));
+      d.source = "builtin";
+      setupFaceoff(d);
+    });
+    const startGame = () => commit((d) => {
+      if (d.settings.mode === "teams") balanceTeams(d);
+      d.scores = {};
+      d.played = {};
+      d.roundNo = 0;
+      d.phase = "pick";
+      d.fx = fx("fanfare");
+    });
+    const nextRound = (kind) => {
+      if (kind === "custom" && !clean(custom, 120)) return;
+      commit((d) => beginRound(d, kind, custom));
+      if (kind === "custom") setCustom("");
+    };
+    const finishGame = () => commit((d) => {
+      d.phase = "final";
+      d.fx = fx("fanfare");
+      d.board.forEach((c) => {
+        c.r = true;
+      });
+    });
+    const playAgain = () => commit((d) => {
+      Object.assign(d, { phase: "lobby", scores: {}, played: {}, roundNo: 0, board: [], bank: 0, strikes: 0, face: null, buzz: null, survey: null, last: null, sharp: [], note: "", question: "" });
+    });
+    const movePlayer = (pid) => commit((d) => {
+      const t = teamOf(d, pid);
+      d.assign[pid] = t === "A" ? "B" : "A";
+    }, { noUndo: true });
+    const kick = (pid) => commit((d) => {
+      var _a2;
+      d.kicked[pid] = ((_a2 = playersRef.current[pid]) == null ? void 0 : _a2.v) || Date.now();
+    }, { noUndo: true });
+    const ids = activeIds(s);
+    const isTeams = s.settings.mode === "teams";
+    const header = /* @__PURE__ */ React.createElement("header", { className: "host-header" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-4 min-w-0" }, /* @__PURE__ */ React.createElement("span", { className: "display brand" }, "Latke Feud"), s.phase !== "lobby" && /* @__PURE__ */ React.createElement("span", { className: "round-pill" }, "Round ", Math.max(1, s.roundNo), " of ", s.settings.rounds)), /* @__PURE__ */ React.createElement(Menorah, { lit: s.phase === "lobby" ? 0 : s.roundNo, size: "sm" }), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 flex-wrap justify-end" }, /* @__PURE__ */ React.createElement("span", { className: "code-pill", "aria-label": `Room code ${code}` }, "Code ", /* @__PURE__ */ React.createElement("b", null, code)), /* @__PURE__ */ React.createElement(SoundToggle, null), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "chip",
+        "aria-pressed": peek,
+        title: "Faint answer hints on hidden cards, for the host",
+        onClick: () => {
+          setPeek(!peek);
+          local.set("lf-peek", peek ? "off" : "on");
+        }
+      },
+      peek ? "Hints on" : "Hints off"
+    ), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: undo, disabled: !undoStack.current.length }, "\u21B6 Undo"), s.phase !== "lobby" && s.phase !== "final" && (confirmEnd ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip chip-warn", onClick: () => {
+      setConfirmEnd(false);
+      finishGame();
+    } }, "End game now?"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => setConfirmEnd(false) }, "Keep playing")) : /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => setConfirmEnd(true) }, "End game"))));
+    const syncBanner = syncErr && /* @__PURE__ */ React.createElement("div", { className: "sync-banner", role: "alert" }, syncErr === "invalid_argument" ? "This screen can't save the game. Host from the account that published this game, or ask them to share it with you with edit access." : syncErr === "quota_exceeded" ? "The game's shared storage is full. Start a new game to keep playing." : "Having trouble reaching shared storage. Retrying\u2026");
+    if (s.phase === "lobby") {
+      const byTeam = (t) => ids.filter((p) => teamOf(s, p) === t);
+      const unplaced = ids.filter((p) => !teamOf(s, p));
+      const PlayerChip = ({ pid }) => /* @__PURE__ */ React.createElement("li", { className: "player-chip" }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "player-name",
+          onClick: () => isTeams && s.settings.teamPick === "host" && movePlayer(pid),
+          title: isTeams && s.settings.teamPick === "host" ? "Tap to move to the other team" : void 0
+        },
+        nameOf(s, pid)
+      ), /* @__PURE__ */ React.createElement("button", { type: "button", className: "player-x", "aria-label": `Remove ${nameOf(s, pid)}`, onClick: () => kick(pid) }, "\xD7"));
+      return /* @__PURE__ */ React.createElement("div", { className: "screen host" }, header, syncBanner, /* @__PURE__ */ React.createElement("main", { className: "lobby" }, /* @__PURE__ */ React.createElement("section", { className: "lobby-code" }, /* @__PURE__ */ React.createElement("p", { className: "eyebrow" }, "Grab your phone and open this same link"), /* @__PURE__ */ React.createElement("div", { className: "big-code", "aria-label": `Room code ${code.split("").join(" ")}` }, code.split("").map((ch, i) => /* @__PURE__ */ React.createElement("span", { key: i, style: { animationDelay: `${i * 0.12}s` } }, ch))), /* @__PURE__ */ React.createElement("p", { className: "lobby-steps" }, "Tap ", /* @__PURE__ */ React.createElement("b", null, "Join"), ", type the code and your name."), /* @__PURE__ */ React.createElement("p", { className: "muted mt-4" }, ids.length, " ", ids.length === 1 ? "player" : "players", " joined")), /* @__PURE__ */ React.createElement("section", { className: "lobby-side" }, /* @__PURE__ */ React.createElement("div", { className: "settings" }, /* @__PURE__ */ React.createElement("div", { className: "setting" }, /* @__PURE__ */ React.createElement("span", { className: "setting-label" }, "Rounds"), /* @__PURE__ */ React.createElement("div", { className: "stepper" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => commit((d) => {
+        d.settings.rounds = Math.max(1, d.settings.rounds - 1);
+      }, { noUndo: true }), "aria-label": "Fewer rounds" }, "\u2212"), /* @__PURE__ */ React.createElement("b", null, s.settings.rounds), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => commit((d) => {
+        d.settings.rounds = Math.min(15, d.settings.rounds + 1);
+      }, { noUndo: true }), "aria-label": "More rounds" }, "+"))), /* @__PURE__ */ React.createElement("div", { className: "setting" }, /* @__PURE__ */ React.createElement("span", { className: "setting-label" }, "Play as"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: isTeams ? "on" : "", onClick: () => commit((d) => {
+        d.settings.mode = "teams";
+      }, { noUndo: true }) }, "Two teams"), /* @__PURE__ */ React.createElement("button", { type: "button", className: !isTeams ? "on" : "", onClick: () => commit((d) => {
+        d.settings.mode = "solo";
+      }, { noUndo: true }) }, "Everyone for themselves"))), isTeams && /* @__PURE__ */ React.createElement("div", { className: "setting" }, /* @__PURE__ */ React.createElement("span", { className: "setting-label" }, "Teams"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: s.settings.teamPick === "host" ? "on" : "", onClick: () => commit((d) => {
+        d.settings.teamPick = "host";
+      }, { noUndo: true }) }, "I'll assign"), /* @__PURE__ */ React.createElement("button", { type: "button", className: s.settings.teamPick === "phones" ? "on" : "", onClick: () => commit((d) => {
+        d.settings.teamPick = "phones";
+        d.assign = {};
+      }, { noUndo: true }) }, "Phones pick")))), isTeams ? /* @__PURE__ */ React.createElement("div", { className: "team-cols" }, ["A", "B"].map((t) => /* @__PURE__ */ React.createElement("div", { key: t, className: "team-col " + TEAMS[t].cls }, /* @__PURE__ */ React.createElement("h3", { className: "display" }, TEAMS[t].name), /* @__PURE__ */ React.createElement("ul", null, byTeam(t).map((p) => /* @__PURE__ */ React.createElement(PlayerChip, { key: p, pid: p }))), !byTeam(t).length && /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "Nobody yet"))), unplaced.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "team-col unplaced" }, /* @__PURE__ */ React.createElement("h3", { className: "display" }, s.settings.teamPick === "host" ? "Tap a name to place" : "Still choosing"), /* @__PURE__ */ React.createElement("ul", null, unplaced.map((p) => /* @__PURE__ */ React.createElement("li", { key: p, className: "player-chip" }, /* @__PURE__ */ React.createElement("span", { className: "player-name" }, nameOf(s, p)), s.settings.teamPick === "host" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { type: "button", className: "mini a", onClick: () => commit((d) => {
+        d.assign[p] = "A";
+      }, { noUndo: true }) }, "Latke"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "mini b", onClick: () => commit((d) => {
+        d.assign[p] = "B";
+      }, { noUndo: true }) }, "Sufganiyah"))))), s.settings.teamPick === "host" && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip mt-2", onClick: () => commit((d) => balanceTeams(d), { noUndo: true }) }, "Split them evenly"))) : /* @__PURE__ */ React.createElement("ul", { className: "solo-list" }, ids.map((p) => /* @__PURE__ */ React.createElement(PlayerChip, { key: p, pid: p }))), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3 items-center mt-auto pt-4" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: startGame, disabled: ids.length < 2 }, "Start the game"), ids.length < 2 && /* @__PURE__ */ React.createElement("span", { className: "muted" }, "Waiting for at least 2 players"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip ml-auto", onClick: onExit }, "Leave")))));
+    }
+    const st = standings(s);
+    const ScoreBox = ({ side }) => /* @__PURE__ */ React.createElement("div", { className: "score-box " + (isTeams ? TEAMS[side].cls : "") + (s.control === side && (s.phase === "round" || s.phase === "steal") ? " in-control" : "") + (s.stealSide === side && s.phase === "steal" ? " stealing" : "") }, /* @__PURE__ */ React.createElement("div", { className: "score-name" }, sideName(s, side)), /* @__PURE__ */ React.createElement("div", { className: "score-num" }, s.scores[side] || 0), isTeams && /* @__PURE__ */ React.createElement("div", { className: "score-members" }, ids.filter((p) => teamOf(s, p) === side).map((p) => nameOf(s, p)).join(" \xB7 ")));
+    const canTapBoard = s.phase === "faceoff" && (((_b = s.face) == null ? void 0 : _b.stage) === "answer1" || ((_c = s.face) == null ? void 0 : _c.stage) === "answer2") || s.phase === "round" || s.phase === "steal";
+    const onTapCard = (i) => {
+      if (s.phase === "faceoff") faceAnswer(i);
+      else if (s.phase === "round") roundReveal(i);
+      else if (s.phase === "steal") stealAnswer(i);
+    };
+    let controls = null;
+    let status = null;
+    if (s.phase === "pick" || s.phase === "roundEnd") {
+      const last = s.roundNo >= s.settings.rounds;
+      status = s.phase === "roundEnd" && s.last ? /* @__PURE__ */ React.createElement("div", { className: "status-big" }, /* @__PURE__ */ React.createElement("span", { className: "gold" }, sideName(s, s.last.side)), " ", s.last.how === "steal" ? "stole" : "banked", " ", /* @__PURE__ */ React.createElement("span", { className: "gold" }, s.last.pts), " points!", ((_d = s.sharp) == null ? void 0 : _d.length) > 0 && /* @__PURE__ */ React.createElement("div", { className: "sharp" }, "Sharp guessers on the phones: ", s.sharp.join(", "))) : /* @__PURE__ */ React.createElement("div", { className: "status-big" }, "Get ready for round 1!");
+      controls = last && s.phase === "roundEnd" ? /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: finishGame }, "Crown the winner") : /* @__PURE__ */ React.createElement("div", { className: "pick-row" }, /* @__PURE__ */ React.createElement("span", { className: "pick-label" }, "Round ", s.roundNo + 1, ":"), /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: () => nextRound("builtin") }, "Ready-made board"), /* @__PURE__ */ React.createElement(Btn, { kind: "blue", big: true, onClick: () => nextRound("survey") }, "Family survey"), /* @__PURE__ */ React.createElement("form", { className: "custom-q", onSubmit: (e) => {
+        e.preventDefault();
+        nextRound("custom");
+      } }, /* @__PURE__ */ React.createElement("input", { id: "custom-q", className: "input", value: custom, maxLength: 120, onChange: (e) => setCustom(e.target.value), placeholder: "Or type your own question\u2026" }), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-ghost", disabled: !clean(custom) }, "Ask the family")));
+    } else if (s.phase === "survey") {
+      const count = Object.values(players).filter((r) => {
+        var _a2, _b2;
+        return r && !s.kicked[r.pid] && ((_a2 = r.survey) == null ? void 0 : _a2.id) === ((_b2 = s.survey) == null ? void 0 : _b2.id) && clean(r.survey.text);
+      }).length;
+      status = ((_e = s.survey) == null ? void 0 : _e.empty) ? /* @__PURE__ */ React.createElement("div", { className: "status-big" }, "No answers came in yet.") : /* @__PURE__ */ React.createElement("div", { className: "survey-status" }, /* @__PURE__ */ React.createElement("p", { className: "eyebrow" }, "Family survey \xB7 answer on your phone"), /* @__PURE__ */ React.createElement(Countdown, { endsAt: s.survey.endsAt, now: Date.now, big: true }), /* @__PURE__ */ React.createElement("p", { className: "status-mid" }, count, " of ", ids.length, " answers in"));
+      controls = ((_f = s.survey) == null ? void 0 : _f.empty) ? /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: extendSurvey }, "Give them 15 more seconds"), s.fallbackQ !== null && /* @__PURE__ */ React.createElement(Btn, { kind: "blue", big: true, onClick: useBuiltInBoard }, "Use the ready-made board")) : /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap" }, /* @__PURE__ */ React.createElement(Btn, { kind: "blue", onClick: () => finishSurvey(true), disabled: !count }, "Close the survey now"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: extendSurvey }, "+15 seconds"));
+    } else if (s.phase === "faceoff") {
+      const f = s.face;
+      const Slot = ({ slot }) => {
+        var _a2, _b2, _c2, _d2, _e2, _f2, _g2;
+        const pid = f[slot];
+        const won = ((_a2 = s.buzz) == null ? void 0 : _a2.winner) === pid;
+        const lost = ((_b2 = s.buzz) == null ? void 0 : _b2.winner) && !won;
+        const pressed = pid && ((_d2 = (_c2 = players[pid]) == null ? void 0 : _c2.buzz) == null ? void 0 : _d2.id) === ((_e2 = s.buzz) == null ? void 0 : _e2.id);
+        return /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "face-slot" + (won ? " won" : "") + (lost ? " lost" : "") + (f.answering === pid ? " answering" : "") + (isTeams && pid ? " " + ((_f2 = TEAMS[teamOf(s, pid)]) == null ? void 0 : _f2.cls) : ""),
+            onClick: () => f.stage === "ready" && swapSlot(slot),
+            disabled: f.stage !== "ready",
+            title: f.stage === "ready" ? "Tap to swap in someone else" : void 0
+          },
+          /* @__PURE__ */ React.createElement("span", { className: "face-name" }, pid ? nameOf(s, pid) : "\u2014"),
+          isTeams && pid && /* @__PURE__ */ React.createElement("span", { className: "face-team" }, (_g2 = TEAMS[teamOf(s, pid)]) == null ? void 0 : _g2.name),
+          f.stage === "ready" && /* @__PURE__ */ React.createElement("span", { className: "face-hint" }, "tap to swap"),
+          f.stage === "open" && /* @__PURE__ */ React.createElement("span", { className: "face-hint" }, pressed ? "pressed!" : "\u2026")
+        );
+      };
+      const diff = ((_g = s.buzz) == null ? void 0 : _g.times) && Object.keys(s.buzz.times).length === 2 ? Math.abs(Object.values(s.buzz.times)[0] - Object.values(s.buzz.times)[1]) / 1e3 : null;
+      status = /* @__PURE__ */ React.createElement("div", { className: "faceoff-row" }, /* @__PURE__ */ React.createElement(Slot, { slot: "p1" }), /* @__PURE__ */ React.createElement("div", { className: "vs" }, f.stage === "ready" && /* @__PURE__ */ React.createElement("span", null, "Face-off!"), f.stage === "open" && /* @__PURE__ */ React.createElement("span", { className: "pulse gold" }, "Buzzers open!"), (f.stage === "answer1" || f.stage === "answer2") && ((_h = s.buzz) == null ? void 0 : _h.winner) && /* @__PURE__ */ React.createElement("div", { className: "buzz-result" }, /* @__PURE__ */ React.createElement("div", { className: "buzz-first" }, /* @__PURE__ */ React.createElement("span", { className: "gold" }, nameOf(s, s.buzz.winner)), " buzzed first!"), /* @__PURE__ */ React.createElement("div", { className: "locked" }, "Buzzers locked", diff !== null && diff < 5 ? ` \xB7 by ${diff.toFixed(2)}s` : ""))), /* @__PURE__ */ React.createElement(Slot, { slot: "p2" }));
+      if (f.stage === "ready") {
+        controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: openBuzzers, disabled: !f.p1 || !f.p2 }, "Open buzzers"), s.note && /* @__PURE__ */ React.createElement("span", { className: "note" }, s.note));
+      } else if (f.stage === "open") {
+        controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, "Waiting for a buzz\u2026"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: resetBuzzers }, "Reset buzzers"), /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, "Phone trouble? Tap who was first:"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => declareBuzz(f.p1) }, nameOf(s, f.p1)), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => declareBuzz(f.p2) }, nameOf(s, f.p2)));
+      } else {
+        controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, /* @__PURE__ */ React.createElement("b", { className: "gold" }, nameOf(s, f.answering)), ", say your answer! Tap the matching card."), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: () => faceAnswer(-1) }, "Not on the board"));
+      }
+    } else if (s.phase === "round") {
+      status = /* @__PURE__ */ React.createElement("div", { className: "status-big" }, /* @__PURE__ */ React.createElement("span", { className: "gold" }, sideName(s, s.control)), " is guessing", /* @__PURE__ */ React.createElement(Strikes, { n: s.strikes }));
+      controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, "Tap a card for a correct answer."), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: roundStrike }, "Strike"), s.strikes === 0 && s.board.filter((c) => c.r).length <= 1 && /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: passControl }, "Pass to ", sideName(s, otherSide(s, s.control))));
+    } else if (s.phase === "steal") {
+      status = /* @__PURE__ */ React.createElement("div", { className: "status-big" }, /* @__PURE__ */ React.createElement("span", { className: "gold" }, sideName(s, s.stealSide)), ", one guess to steal ", s.bank, " points!");
+      controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, "Tap the card if they got it."), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: () => stealAnswer(-1) }, "Steal missed"));
+    }
+    if (s.phase === "final") {
+      const top = (_j = (_i = st[0]) == null ? void 0 : _i.score) != null ? _j : 0;
+      const winners = st.filter((x) => x.score === top);
+      return /* @__PURE__ */ React.createElement("div", { className: "screen host final" }, header, /* @__PURE__ */ React.createElement(Confetti, null), /* @__PURE__ */ React.createElement("main", { className: "final-main" }, /* @__PURE__ */ React.createElement("p", { className: "eyebrow" }, "And the winner is\u2026"), /* @__PURE__ */ React.createElement("h1", { className: "display winner" }, winners.map((w) => w.name).join(" & ")), /* @__PURE__ */ React.createElement("p", { className: "status-mid" }, top, " points", winners.length > 1 ? " each. It's a tie!" : ""), /* @__PURE__ */ React.createElement("ol", { className: "final-list" }, st.map((x, i) => /* @__PURE__ */ React.createElement("li", { key: x.side, className: i === 0 || x.score === top ? "top" : "" }, /* @__PURE__ */ React.createElement("span", null, x.name), /* @__PURE__ */ React.createElement("b", null, x.score)))), /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap justify-center" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: playAgain }, "Play again"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: onExit }, "Close game"))));
+    }
+    const showBoard = s.board.length > 0 && (s.phase === "faceoff" || s.phase === "round" || s.phase === "steal" || s.phase === "roundEnd");
+    return /* @__PURE__ */ React.createElement("div", { className: "screen host" }, header, syncBanner, /* @__PURE__ */ React.createElement(StrikeOverlay, { n: xs == null ? void 0 : xs.n, k: xs == null ? void 0 : xs.k }), /* @__PURE__ */ React.createElement("main", { className: "game " + (isTeams ? "teams" : "solo") }, isTeams && /* @__PURE__ */ React.createElement(ScoreBox, { side: "A" }), /* @__PURE__ */ React.createElement("section", { className: "stage" }, s.question && s.phase !== "pick" && /* @__PURE__ */ React.createElement("h1", { className: "question" }, s.question), showBoard ? /* @__PURE__ */ React.createElement("div", { className: "board-wrap" }, /* @__PURE__ */ React.createElement(Board, { board: s.board, onTap: onTapCard, canTap: canTapBoard, host: true, peek }), /* @__PURE__ */ React.createElement("div", { className: "bank" }, /* @__PURE__ */ React.createElement("span", null, "Round bank"), /* @__PURE__ */ React.createElement("b", null, s.bank))) : s.phase === "pick" || s.phase === "roundEnd" ? /* @__PURE__ */ React.createElement(ScoreTable, { st }) : null, s.phase === "survey" && !((_k = s.survey) == null ? void 0 : _k.empty) && /* @__PURE__ */ React.createElement("div", { className: "hidden-board" }, Array.from({ length: 7 }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "ghost-card" }, "?"))), /* @__PURE__ */ React.createElement("div", { className: "status" }, status)), isTeams ? /* @__PURE__ */ React.createElement(ScoreBox, { side: "B" }) : /* @__PURE__ */ React.createElement("aside", { className: "solo-scores" }, /* @__PURE__ */ React.createElement("h3", { className: "display" }, "Scores"), /* @__PURE__ */ React.createElement("ol", null, st.map((x) => /* @__PURE__ */ React.createElement("li", { key: x.side, className: (s.control === x.side && (s.phase === "round" || s.phase === "steal") ? "in-control " : "") + (s.stealSide === x.side && s.phase === "steal" ? "stealing" : "") }, /* @__PURE__ */ React.createElement("span", null, x.name), /* @__PURE__ */ React.createElement("b", null, x.score)))))), s.phase === "roundEnd" && showBoard && /* @__PURE__ */ React.createElement("div", { className: "round-scores" }, /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true })), /* @__PURE__ */ React.createElement("footer", { className: "host-controls" }, controls));
+  }
+  function ScoreTable({ st, inline }) {
+    return /* @__PURE__ */ React.createElement("div", { className: "score-table" + (inline ? " inline" : "") }, !inline && /* @__PURE__ */ React.createElement("h2", { className: "display" }, "Scoreboard"), /* @__PURE__ */ React.createElement("ol", null, st.map((x, i) => /* @__PURE__ */ React.createElement("li", { key: x.side }, /* @__PURE__ */ React.createElement("span", { className: "rank" }, i + 1), /* @__PURE__ */ React.createElement("span", { className: "nm" }, x.name), /* @__PURE__ */ React.createElement("b", null, x.score)))));
+  }
+  function Phone({ db, room, code, name, onLeave }) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+    const pid = useMemo(myPid, []);
+    const recRef = useRef({ pid, code, name, team: null, v: 0, joinedAt: Date.now(), buzz: null, survey: null, guess: null });
+    const [rec, setRec] = useState(recRef.current);
+    const [sendErr, setSendErr] = useState(null);
+    const [early, setEarly] = useState(0);
+    const docRef = useMemo(() => db.doc(`rooms/${code}/players/${pid}`), [db, code, pid]);
+    const write = useWriter(docRef, (e) => setSendErr(e));
+    const [meFast, setMeFast] = useState(false);
+    const { state: s, status, hostNow } = useRoomState(db, code, meFast);
+    const send = useCallback((patch) => {
+      const next = { ...recRef.current, ...patch, v: Math.max((recRef.current.v || 0) + 1, Date.now()), ts: Date.now() };
+      recRef.current = next;
+      setRec(next);
+      write(next);
+      if (room) room.presence({ ff: { code, rec: next } }).catch(() => {
+      });
+    }, [write, room, code]);
+    useEffect(() => {
+      local.set("lf-player", JSON.stringify({ code, name }));
+      local.set("lf-last-code", code);
+      send({ name, code, left: false });
+    }, []);
+    const inFace = !!(s && s.phase === "faceoff" && s.face && (s.face.p1 === pid || s.face.p2 === pid));
+    useEffect(() => {
+      setMeFast(inFace && (s.face.stage === "ready" || s.face.stage === "open"));
+    }, [inFace, (_a = s == null ? void 0 : s.face) == null ? void 0 : _a.stage]);
+    const played = useRef(/* @__PURE__ */ new Set());
+    useEffect(() => {
+      var _a2;
+      if (!((_a2 = s == null ? void 0 : s.buzz) == null ? void 0 : _a2.winner) || played.current.has(s.buzz.id)) return;
+      played.current.add(s.buzz.id);
+      if (s.buzz.winner === pid) {
+        Sound.ding();
+        try {
+          navigator.vibrate && navigator.vibrate([80, 40, 80]);
+        } catch (e) {
+        }
+      }
+    }, [(_b = s == null ? void 0 : s.buzz) == null ? void 0 : _b.winner, (_c = s == null ? void 0 : s.buzz) == null ? void 0 : _c.id]);
+    const leave = () => {
+      send({ left: true });
+      local.del("lf-player");
+      setTimeout(onLeave, 250);
+    };
+    const frame = (body, opts = {}) => /* @__PURE__ */ React.createElement("div", { className: "screen phone" + (opts.cls ? " " + opts.cls : "") }, /* @__PURE__ */ React.createElement("header", { className: "phone-header" }, /* @__PURE__ */ React.createElement("span", { className: "display brand-sm" }, "Latke Feud"), /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, name, " \xB7 ", code)), sendErr === "invalid_argument" && !room && /* @__PURE__ */ React.createElement("div", { className: "sync-banner", role: "alert" }, "Your phone can see the game but can't send to it. Ask the host to share the game with you with edit access, then reload."), /* @__PURE__ */ React.createElement("main", { className: "phone-main" }, body), /* @__PURE__ */ React.createElement("footer", { className: "phone-footer" }, /* @__PURE__ */ React.createElement(SoundToggle, null), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: leave }, "Leave game")));
+    if (!s) {
+      if (status === "missing") return frame(
+        /* @__PURE__ */ React.createElement("div", { className: "phone-card" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, "No game called ", code), /* @__PURE__ */ React.createElement("p", null, "Check the code on the TV and try again."), /* @__PURE__ */ React.createElement(Btn, { onClick: onLeave }, "Back"))
+      );
+      return frame(/* @__PURE__ */ React.createElement("div", { className: "phone-card" }, /* @__PURE__ */ React.createElement("p", { className: "pulse text-xl" }, status === "slow" ? "Still connecting to the game\u2026 check your connection." : "Connecting to the game\u2026")));
+    }
+    const isTeams = s.settings.mode === "teams";
+    const myTeam = isTeams ? teamOf(s, pid) : null;
+    const mySide = isTeams ? myTeam : pid;
+    const kicked = (_d = s.kicked) == null ? void 0 : _d[pid];
+    if (kicked) return frame(/* @__PURE__ */ React.createElement("div", { className: "phone-card" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, "You're out of this game"), /* @__PURE__ */ React.createElement("p", null, "The host removed you. Tap below to join again."), /* @__PURE__ */ React.createElement(Btn, { onClick: () => send({ left: false }) }, "Rejoin")));
+    const teamBadge = myTeam && /* @__PURE__ */ React.createElement("div", { className: "team-badge " + TEAMS[myTeam].cls }, TEAMS[myTeam].name);
+    if (s.phase === "lobby") {
+      const choose = isTeams && s.settings.teamPick === "phones";
+      return frame(
+        /* @__PURE__ */ React.createElement("div", { className: "phone-card" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-4xl" }, "You're in, ", name, "!"), !s.roster[pid] && /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Saying hello to the big screen\u2026"), choose ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "Pick your team:"), /* @__PURE__ */ React.createElement("div", { className: "grid gap-3" }, ["A", "B"].map((t) => /* @__PURE__ */ React.createElement("button", { key: t, type: "button", className: "team-pick " + TEAMS[t].cls + (rec.team === t ? " on" : ""), onClick: () => {
+          Sound.ensure();
+          send({ team: t });
+        } }, TEAMS[t].name, rec.team === t ? " \u2713" : "")))) : isTeams ? myTeam ? teamBadge : /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "The host is putting teams together.") : /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "Everyone plays for themselves this time."), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Watch the big screen. The game starts soon."))
+      );
+    }
+    if (s.phase === "survey") {
+      return frame(/* @__PURE__ */ React.createElement(SurveyCard, { key: (_e = s.survey) == null ? void 0 : _e.id, s, rec, send, hostNow }));
+    }
+    if (s.phase === "faceoff") {
+      const f = s.face;
+      if (inFace) {
+        const opp = f.p1 === pid ? f.p2 : f.p1;
+        const open = f.stage === "open" && ((_f = s.buzz) == null ? void 0 : _f.open);
+        const pressed = ((_g = rec.buzz) == null ? void 0 : _g.id) === ((_h = s.buzz) == null ? void 0 : _h.id);
+        const winner = (_i = s.buzz) == null ? void 0 : _i.winner;
+        if (winner) {
+          const me = winner === pid;
+          return frame(
+            /* @__PURE__ */ React.createElement("div", { className: "buzz-outcome " + (me ? "won" : "lost") }, /* @__PURE__ */ React.createElement("div", { className: "display outcome-title" }, me ? "You buzzed first!" : "Too slow!"), /* @__PURE__ */ React.createElement("p", { className: "text-xl" }, me ? "Say your answer out loud!" : `${nameOf(s, winner)} got there first. Buzzers locked.`), f.stage === "answer2" && f.answering === pid && /* @__PURE__ */ React.createElement("p", { className: "text-xl gold mt-4" }, "Your turn to answer now!")),
+            { cls: "phone-buzz" }
+          );
+        }
+        return frame(
+          /* @__PURE__ */ React.createElement("div", { className: "buzz-wrap" }, /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "Face-off against ", /* @__PURE__ */ React.createElement("b", null, nameOf(s, opp))), /* @__PURE__ */ React.createElement("p", { className: "phone-q" }, s.question), /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              type: "button",
+              className: "buzz-btn" + (open && !pressed ? " live" : "") + (pressed ? " pressed" : "") + (early ? " nope" : ""),
+              onPointerDown: (e) => {
+                e.preventDefault();
+                Sound.ensure();
+                if (open && !pressed) {
+                  send({ buzz: { id: s.buzz.id, at: hostNow() } });
+                  Sound.buzz();
+                  try {
+                    navigator.vibrate && navigator.vibrate(60);
+                  } catch (err) {
+                  }
+                } else if (!open) {
+                  setEarly((n) => n + 1);
+                  setTimeout(() => setEarly(0), 500);
+                }
+              },
+              "aria-label": "Buzz"
+            },
+            pressed ? "BUZZED!" : open ? "BUZZ" : "WAIT"
+          ), /* @__PURE__ */ React.createElement("p", { className: "muted" }, pressed ? "Checking who was first\u2026" : open ? "Press it!" : early ? "Not yet! Wait for the host." : "Get ready. The host opens the buzzers.")),
+          { cls: "phone-buzz" }
+        );
+      }
+      return frame(/* @__PURE__ */ React.createElement(WatchCard, { key: s.roundKey, s, rec, send, title: "Watch the face-off", sub: `${nameOf(s, f.p1)} vs ${nameOf(s, f.p2)}` }));
+    }
+    if (s.phase === "round" || s.phase === "steal") {
+      const mine = s.phase === "steal" ? s.stealSide === mySide : s.control === mySide;
+      const title = s.phase === "steal" ? mine ? "Your side can steal!" : `${sideName(s, s.stealSide)} is trying to steal` : mine ? "Your side is guessing!" : `${sideName(s, s.control)} is guessing`;
+      return frame(/* @__PURE__ */ React.createElement(WatchCard, { key: s.roundKey, s, rec, send, title, sub: `Bank: ${s.bank} \xB7 Strikes: ${s.strikes}`, hot: mine }));
+    }
+    if (s.phase === "pick" || s.phase === "roundEnd") {
+      const st = standings(s);
+      return frame(
+        /* @__PURE__ */ React.createElement("div", { className: "phone-card" }, s.last ? /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, /* @__PURE__ */ React.createElement("span", { className: "gold" }, sideName(s, s.last.side)), " ", s.last.how === "steal" ? "stole" : "banked", " ", s.last.pts, "!") : /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, "Get ready!"), ((_j = s.sharp) == null ? void 0 : _j.includes(name)) && /* @__PURE__ */ React.createElement("p", { className: "gold text-lg" }, "Your guess was on the board. Nice!"), teamBadge, /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true }), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Next round coming up on the big screen."))
+      );
+    }
+    if (s.phase === "final") {
+      const st = standings(s);
+      const top = (_l = (_k = st[0]) == null ? void 0 : _k.score) != null ? _l : 0;
+      const won = st.some((x) => x.side === mySide && x.score === top);
+      return frame(
+        /* @__PURE__ */ React.createElement("div", { className: "phone-card" }, won && /* @__PURE__ */ React.createElement(Confetti, null), /* @__PURE__ */ React.createElement("p", { className: "eyebrow" }, "Final scores"), /* @__PURE__ */ React.createElement("h2", { className: "display text-4xl" }, won ? "You won! Mazel tov!" : `${st.filter((x) => x.score === top).map((x) => x.name).join(" & ")} won!`), /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true }), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Chag sameach!"))
+      );
+    }
+    return frame(/* @__PURE__ */ React.createElement("div", { className: "phone-card" }, /* @__PURE__ */ React.createElement("p", null, "Watch the big screen.")));
+  }
+  function SurveyCard({ s, rec, send, hostNow }) {
+    var _a, _b, _c, _d, _e, _f;
+    const mine = ((_a = rec.survey) == null ? void 0 : _a.id) === ((_b = s.survey) == null ? void 0 : _b.id) ? rec.survey.text : "";
+    const [text, setText] = useState(mine);
+    const timeUp = ((_c = s.survey) == null ? void 0 : _c.done) || hostNow() >= ((_d = s.survey) == null ? void 0 : _d.endsAt);
+    const [, force] = useState(0);
+    useEffect(() => {
+      const t = setInterval(() => force((x) => x + 1), 500);
+      return () => clearInterval(t);
+    }, []);
+    const submit = (e) => {
+      e.preventDefault();
+      const t = clean(text, 32);
+      if (!t || timeUp) return;
+      send({ survey: { id: s.survey.id, text: t, at: hostNow() } });
+    };
+    return /* @__PURE__ */ React.createElement("form", { className: "phone-card", onSubmit: submit }, /* @__PURE__ */ React.createElement("p", { className: "eyebrow" }, "Family survey"), /* @__PURE__ */ React.createElement("p", { className: "phone-q big" }, s.question), !((_e = s.survey) == null ? void 0 : _e.empty) && /* @__PURE__ */ React.createElement(Countdown, { endsAt: s.survey.endsAt, now: hostNow }), ((_f = s.survey) == null ? void 0 : _f.empty) ? /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "The host is giving everyone a little more time.") : null, /* @__PURE__ */ React.createElement("input", { id: "survey-answer", className: "input big-input", value: text, maxLength: 32, onChange: (e) => setText(e.target.value), placeholder: "Your answer", disabled: timeUp, autoComplete: "off" }), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-gold btn-big w-full", disabled: timeUp || !clean(text) }, mine && clean(text) === mine ? "Sent \u2713" : mine ? "Change my answer" : "Send answer"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, timeUp ? "Time's up! Look at the big screen." : "One short answer. Keep it secret!"));
+  }
+  function WatchCard({ s, rec, send, title, sub, hot }) {
+    var _a;
+    const mine = ((_a = rec.guess) == null ? void 0 : _a.id) === s.roundKey ? rec.guess.text : "";
+    const [text, setText] = useState(mine);
+    const submit = (e) => {
+      e.preventDefault();
+      const t = clean(text, 32);
+      if (!t) return;
+      send({ guess: { id: s.roundKey, text: t } });
+    };
+    return /* @__PURE__ */ React.createElement("div", { className: "phone-card" + (hot ? " hot" : "") }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, title), /* @__PURE__ */ React.createElement("p", { className: "muted" }, sub), /* @__PURE__ */ React.createElement("p", { className: "phone-q" }, s.question), /* @__PURE__ */ React.createElement("form", { onSubmit: submit, className: "guess-form" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Your secret guess for the board"), /* @__PURE__ */ React.createElement("input", { id: "watch-guess", className: "input", value: text, maxLength: 32, onChange: (e) => setText(e.target.value), placeholder: "Type one short guess", autoComplete: "off" })), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-blue w-full", disabled: !clean(text) || clean(text) === mine }, mine ? clean(text) === mine ? "Guess saved \u2713" : "Change guess" : "Save guess")), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "If it shows up on the board, you'll get a shout-out after the round."));
+  }
+  function App() {
+    const caps = useCapabilities();
+    const [mode, setMode] = useState(() => {
+      try {
+        const p = JSON.parse(local.get("lf-player") || "null");
+        if (p && /^[A-Z]{4}$/.test(p.code) && p.name) return { kind: "phone", code: p.code, name: p.name };
+      } catch (e) {
+      }
+      return { kind: "landing" };
+    });
+    const [busy, setBusy] = useState("");
+    if (caps.loading) return /* @__PURE__ */ React.createElement("div", { className: "screen center" }, /* @__PURE__ */ React.createElement("p", { className: "pulse text-2xl" }, "Lighting the candles\u2026"));
+    if (!caps.db) {
+      return /* @__PURE__ */ React.createElement(ErrorScreen, { title: "Shared storage isn't available" }, /* @__PURE__ */ React.createElement("p", null, "This game keeps the TV and everyone's phones in sync through the artifact's shared storage, and this view can't reach it."), /* @__PURE__ */ React.createElement("p", null, "Open the game from its claude.ai link and make sure you're signed in to Claude. If you are, reload the page."), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "People outside your organization need to be invited to the game by email to send buzzes and answers."));
+    }
+    const { db, room } = caps;
+    const host = async (resume) => {
+      setBusy("Setting the table\u2026");
+      try {
+        if (resume) {
+          const snap = await db.doc("rooms/" + resume).get();
+          if (snap.exists && snap.data()) {
+            setMode({ kind: "host", code: resume, initial: snap.data() });
+            setBusy("");
+            return;
+          }
+          local.del("lf-host-code");
+        }
+        let code = makeCode();
+        for (let i = 0; i < 5; i++) {
+          const snap = await db.doc("rooms/" + code).get().catch(() => null);
+          if (!snap || !snap.exists) break;
+          code = makeCode();
+        }
+        setMode({ kind: "host", code, initial: newGame(code) });
+      } catch (e) {
+        setMode({ kind: "landing" });
+      }
+      setBusy("");
+    };
+    if (busy) return /* @__PURE__ */ React.createElement("div", { className: "screen center" }, /* @__PURE__ */ React.createElement("p", { className: "pulse text-2xl" }, busy));
+    if (mode.kind === "host") return /* @__PURE__ */ React.createElement(Host, { db, room, code: mode.code, initial: mode.initial, onExit: () => {
+      local.del("lf-host-code");
+      setMode({ kind: "landing" });
+    } });
+    if (mode.kind === "phone") return /* @__PURE__ */ React.createElement(Phone, { db, room, code: mode.code, name: mode.name, onLeave: () => setMode({ kind: "landing" }) });
+    return /* @__PURE__ */ React.createElement(Landing, { db, onHost: () => host(null), onResume: (c) => host(c), onJoin: (code, name) => setMode({ kind: "phone", code, name }) });
+  }
+  ReactDOM.createRoot(document.getElementById("root")).render(/* @__PURE__ */ React.createElement(App, null));
+})();
+
+</script>
