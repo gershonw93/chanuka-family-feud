@@ -162,7 +162,7 @@ function setupFaceoff(s) {
   s.face = { p1, p2, stage: "ready", first: null, answering: null };
   s.buzz = { id: rid(), open: false, winner: null, times: null };
   s.phase = "faceoff";
-  if (s.settings.autoOpen && p1 && p2) {
+  if (buzzMode(s) === "instant" && p1 && p2) {
     s.buzz.open = true;
     s.buzz.openedAt = Date.now();
     s.face.stage = "open";
@@ -229,6 +229,19 @@ function beginRound(s, kind, opts = {}) {
   }
 }
 
+// How the buzzers open: "random" (6-9 s after the question appears), "tap" (host), "instant".
+const buzzMode = (s) => s.settings.buzzMode || (s.settings.autoOpen ? "instant" : "random");
+
+// Schedule the random opening whenever a face-off is waiting for its buzzers.
+function syncAutoOpen(d) {
+  const f = d.face;
+  if (d.phase === "faceoff" && f && f.stage === "ready" && f.p1 && f.p2 && buzzMode(d) === "random") {
+    if (!f.autoAt) f.autoAt = Date.now() + 6000 + Math.floor(Math.random() * 3000);
+  } else if (f && f.autoAt) {
+    delete f.autoAt;
+  }
+}
+
 const membersOf = (s, side) => (s.settings.mode === "teams" ? activeIds(s).filter((p) => teamOf(s, p) === side) : [side]);
 
 // Who may type an answer right now. A new id whenever a new answer is expected.
@@ -262,7 +275,7 @@ function endRound(s, side, how, players) {
   // Phones that guessed an answer on the board during the round
   const sharp = [];
   Object.values(players || {}).forEach((rec) => {
-    if (!rec || s.kicked?.[rec.pid] || rec.guess?.id !== s.roundKey) return;
+    if (!rec || rec.remote || s.kicked?.[rec.pid] || rec.guess?.id !== s.roundKey) return;
     if (s.board.some((c) => guessMatches(rec.guess.text, c.t))) sharp.push(nameOf(s, rec.pid));
   });
   s.sharp = sharp.slice(0, 12);
@@ -616,7 +629,10 @@ function ErrorScreen({ title, children }) {
 /* Landing                                                             */
 /* ------------------------------------------------------------------ */
 
-function Landing({ db, onHost, onResume, onJoin, onPrep }) {
+function Landing({ db, onHost, onResume, onJoin, onPrep, onRemote }) {
+  const [rcode, setRcode] = useState("");
+  const [rpin, setRpin] = useState("");
+  const [rerr, setRerr] = useState("");
   const hashCode = (location.hash || "").replace("#", "").toUpperCase();
   const [code, setCode] = useState(/^[A-Z]{4}$/.test(hashCode) ? hashCode : local.get("lf-last-code") || "");
   const [name, setName] = useState(local.get("lf-name") || "");
@@ -692,6 +708,20 @@ function Landing({ db, onHost, onResume, onJoin, onPrep }) {
             <Btn kind="gold" onClick={onPrep}>Prepare questions</Btn>
             {resumeCode && <Btn kind="ghost" onClick={() => onResume(resumeCode)}>Resume game {resumeCode}</Btn>}
           </div>
+          <form className="remote-form" onSubmit={(e) => {
+            e.preventDefault();
+            const c = rcode.trim().toUpperCase();
+            if (!/^[A-Z]{4}$/.test(c) || !/^\d{4}$/.test(rpin.trim())) { setRerr("Type the 4-letter room code and the 4-digit PIN from Host tools on the TV."); return; }
+            onRemote(c, rpin.trim());
+          }}>
+            <span className="setting-label">Host remote: run the game from this phone</span>
+            <div className="flex flex-wrap gap-2">
+              <input id="remote-code" className="input remote-in" value={rcode} onChange={(e) => setRcode(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4))} placeholder="Code" autoComplete="off" aria-label="Room code" />
+              <input id="remote-pin" className="input remote-in" value={rpin} inputMode="numeric" onChange={(e) => setRpin(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))} placeholder="PIN" autoComplete="off" aria-label="Host PIN" />
+              <button type="submit" className="btn btn-ghost">Host remote</button>
+            </div>
+            {rerr && <p className="err">{rerr}</p>}
+          </form>
         </div>
       </div>
     </div>
@@ -716,7 +746,7 @@ function Host({ db, room, code, initial, onExit }) {
   const [library, saveLibrary, libErr] = useLibrary(db, setId);
   const docRef = useMemo(() => db.doc("rooms/" + code), [db, code]);
   const write = useWriter(docRef, setSyncErr);
-  const fast = s.phase === "faceoff" && s.face?.stage === "open";
+  const fast = (s.phase === "faceoff" && s.face?.stage === "open") || Object.keys(s.remotes || {}).length > 0;
   const players = usePlayers(db, room, code, fast);
   const playersRef = useRef(players);
   playersRef.current = players;
@@ -727,6 +757,7 @@ function Host({ db, room, code, initial, onExit }) {
     const prev = sRef.current;
     const next = clone(prev);
     fn(next);
+    syncAutoOpen(next);
     syncTurn(next);
     next.rev = (prev.rev || 0) + 1;
     if (!opts.noUndo) {
@@ -746,6 +777,8 @@ function Host({ db, room, code, initial, onExit }) {
     next.roster = clone(sRef.current.roster);
     next.kicked = clone(sRef.current.kicked);
     next.assign = clone(sRef.current.assign);
+    next.remotes = clone(sRef.current.remotes || {});
+    next.lastCmd = clone(sRef.current.lastCmd || {});
     sRef.current = next;
     setS(next);
     write(next);
@@ -766,7 +799,7 @@ function Host({ db, room, code, initial, onExit }) {
     const cur = sRef.current;
     const updates = {}, leaving = [], back = [];
     Object.values(players).forEach((rec) => {
-      if (!rec || rec.code !== code) return;
+      if (!rec || rec.code !== code || rec.remote) return;
       const k = cur.kicked[rec.pid];
       if (rec.left) { if (cur.roster[rec.pid] && !k) leaving.push([rec.pid, rec.v || 1]); return; }
       if (k) { if ((rec.v || 0) > k) back.push(rec.pid); else return; }
@@ -796,6 +829,14 @@ function Host({ db, room, code, initial, onExit }) {
         const sec = Math.ceil(left / 1000);
         if (left > 0 && sec <= 5 && sec !== lastTick.current) { lastTick.current = sec; Sound.tick(); }
         if (left <= 0) finishSurvey();
+      }
+      if (st.phase === "faceoff" && st.face?.stage === "ready" && st.face.autoAt && Date.now() >= st.face.autoAt) {
+        commit((d) => {
+          if (d.phase !== "faceoff" || d.face?.stage !== "ready") return;
+          d.buzz = { id: rid(), open: true, openedAt: Date.now(), winner: null, times: null };
+          d.face.stage = "open";
+          d.note = "";
+        });
       }
       if (st.phase === "faceoff" && st.face?.stage === "open" && st.buzz?.open) {
         const presses = [st.face.p1, st.face.p2].map((pid) => {
@@ -1079,7 +1120,7 @@ function Host({ db, room, code, initial, onExit }) {
     setRounds: (n) => commit((d) => { d.settings.rounds = Math.max(Math.max(1, d.roundNo), Math.min(30, n)); }, { noUndo: true }),
     setSurveySec: (n) => commit((d) => { d.settings.surveySec = n; }, { noUndo: true }),
     setOpenPts: (n) => commit((d) => { d.settings.openPts = n; }, { noUndo: true }),
-    setAutoOpen: (v) => commit((d) => { d.settings.autoOpen = v; }, { noUndo: true }),
+    setBuzzMode: (v) => commit((d) => { d.settings.buzzMode = v; }, { noUndo: true }),
     movePlayer: (pid) => commit((d) => { d.assign[pid] = teamOf(d, pid) === "A" ? "B" : "A"; }),
     kick: (pid) => commit((d) => { d.kicked[pid] = playersRef.current[pid]?.v || Date.now(); }),
   };
@@ -1100,6 +1141,68 @@ function Host({ db, room, code, initial, onExit }) {
   }, { noUndo: true });
 
   const kick = (pid) => commit((d) => { d.kicked[pid] = playersRef.current[pid]?.v || Date.now(); }, { noUndo: true });
+
+  /* ---- host remote (the host's own phone) ---- */
+  const pin = useMemo(() => {
+    const k = "lf-pin-" + code;
+    let p = local.get(k);
+    if (!/^\d{4}$/.test(p || "")) { p = String(1000 + Math.floor(Math.random() * 9000)); local.set(k, p); }
+    return p;
+  }, [code]);
+  const runCmd = (c) => {
+    const st = sRef.current;
+    const answering = st.phase === "faceoff" && st.face && (st.face.stage === "answer1" || st.face.stage === "answer2");
+    switch (c.type) {
+      case "tap": {
+        const i = Number(c.arg);
+        if (!st.board[i] || st.board[i].r) break;
+        if (answering && !st.openQ) faceAnswer(i);
+        else if (st.phase === "round") roundReveal(i);
+        else if (st.phase === "steal") stealAnswer(i);
+        break;
+      }
+      case "strike":
+        if (answering) { if (st.openQ) judge(false); else faceAnswer(-1); }
+        else if (st.phase === "round") roundStrike();
+        else if (st.phase === "steal") stealAnswer(-1);
+        break;
+      case "correct": if (answering && st.openQ) judge(true); break;
+      case "open": if (st.phase === "faceoff" && st.face?.stage === "ready" && st.face.p1 && st.face.p2) openBuzzers(); break;
+      case "reset": if (st.phase === "faceoff") resetBuzzers(); break;
+      case "override": overrideTyped(); break;
+      case "pass": if (st.phase === "round") passControl(); break;
+      case "nobody": if (st.phase === "faceoff" && st.openQ) nobodyGotIt(); break;
+      case "start": if (st.phase === "lobby" && activeIds(st).length >= 2) startGame(); break;
+      case "next":
+        if (st.phase !== "pick" && st.phase !== "roundEnd") break;
+        if (c.arg === "ask") { const q = clean(c.text, 120); if (q) commit((d) => beginRound(d, "open", { text: q })); }
+        else if (c.arg === "mine") { if (nextMine) commit((d) => beginRound(d, "mine", { item: nextMine })); }
+        else if (c.arg === "builtin" || c.arg === "survey") commit((d) => beginRound(d, c.arg, {}));
+        break;
+      case "closeSurvey": if (st.phase === "survey") finishSurvey(true); break;
+      case "extend": if (st.phase === "survey") extendSurvey(); break;
+      case "finish": if (st.phase !== "lobby" && st.phase !== "final") finishGame(); break;
+      case "again": if (st.phase === "final") playAgain(); break;
+      case "undo": undo(); break;
+      default: break;
+    }
+  };
+  useEffect(() => {
+    const good = Object.values(players).filter((r) => r && r.remote && r.code === code && String(r.pin) === pin);
+    const cur = sRef.current;
+    const fresh = good.filter((r) => !(cur.remotes || {})[r.pid]);
+    if (fresh.length) {
+      commit((d) => { d.remotes = { ...(d.remotes || {}) }; fresh.forEach((r) => { d.remotes[r.pid] = true; }); }, { noUndo: true });
+      return;
+    }
+    for (const r of good) {
+      const c = r.cmd;
+      if (!c || typeof c.id !== "string" || (cur.lastCmd || {})[r.pid] === c.id) continue;
+      commit((d) => { d.lastCmd = { ...(d.lastCmd || {}), [r.pid]: c.id }; }, { noUndo: true });
+      runCmd(c);
+      break;
+    }
+  }, [players, s.rev]);
 
   /* ---- render ---- */
 
@@ -1127,7 +1230,7 @@ function Host({ db, room, code, initial, onExit }) {
         )}
       </div>
       {toolsOpen && ReactDOM.createPortal(
-        <HostTools s={s} act={act} live={live} library={library} saveLibrary={saveLibrary} libErr={libErr} onClose={() => setToolsOpen(false)} />,
+        <HostTools s={s} act={act} live={live} library={library} saveLibrary={saveLibrary} libErr={libErr} pin={pin} code={code} onClose={() => setToolsOpen(false)} />,
         document.body
       )}
     </header>
@@ -1344,7 +1447,7 @@ function Host({ db, room, code, initial, onExit }) {
       <div className="faceoff-row">
         <Slot slot="p1" />
         <div className="vs">
-          {f.stage === "ready" && <span>Face-off!</span>}
+          {f.stage === "ready" && <span>{f.autoAt ? <span className="pulse">Get ready to buzz…</span> : "Face-off!"}</span>}
           {f.stage === "open" && <span className="pulse gold">Buzzers open!</span>}
           {(f.stage === "answer1" || f.stage === "answer2") && s.buzz?.winner && (
             <div className="buzz-result">
@@ -1359,7 +1462,8 @@ function Host({ db, room, code, initial, onExit }) {
     if (f.stage === "ready") {
       controls = (
         <div className="flex gap-3 flex-wrap items-center">
-          <Btn big onClick={openBuzzers} disabled={!f.p1 || !f.p2}>Open buzzers</Btn>
+          <Btn big onClick={openBuzzers} disabled={!f.p1 || !f.p2}>{f.autoAt ? "Open now" : "Open buzzers"}</Btn>
+          {f.autoAt && <span className="note">Buzzers open by surprise in a few seconds.</span>}
           {s.note && <span className="note">{s.note}</span>}
           {s.openQ && s.note && <Btn kind="ghost" onClick={nobodyGotIt}>Nobody got it, move on</Btn>}
         </div>
@@ -1599,7 +1703,8 @@ function Prep({ db, onBack, onHost }) {
   );
 }
 
-function HostTools({ s, act, live, library, saveLibrary, libErr, onClose }) {
+function HostTools({ s, act, live, library, saveLibrary, libErr, pin, code, onClose }) {
+  const [showPin, setShowPin] = useState(false);
   const isTeams = s.settings.mode === "teams";
   const ids = activeIds(s);
   const sideList = sides(s);
@@ -1631,6 +1736,17 @@ function HostTools({ s, act, live, library, saveLibrary, libErr, onClose }) {
           <button type="button" className="chip" onClick={onClose}>Close</button>
         </div>
         <p className="muted text-sm">Everything here changes the live game for everyone. Made a mistake? Use Undo.</p>
+
+        <section className="tool-sec remote-sec">
+          <h3>Run the game from your phone</h3>
+          <p className="text-sm">On your phone, open <b>{WEB ? SITE : "this same link"}</b>, and under <b>Host remote</b> enter room code <b className="gold">{code}</b> and your PIN. Your phone shows the answers and every control.</p>
+          <div className="tool-row">
+            {showPin
+              ? <><span className="pin">{pin}</span><button type="button" className="chip" onClick={() => setShowPin(false)}>Hide PIN</button></>
+              : <button type="button" className="chip chip-on" onClick={() => setShowPin(true)}>Show my PIN (turn the TV away)</button>}
+            {Object.keys(s.remotes || {}).length > 0 && <span className="flash">✓ Remote connected</span>}
+          </div>
+        </section>
 
         {s.phase !== "lobby" && (
           <section className="tool-sec">
@@ -1751,8 +1867,9 @@ function HostTools({ s, act, live, library, saveLibrary, libErr, onClose }) {
           <div className="tool-row">
             <span className="tool-label">Buzzers open</span>
             <div className="seg">
-              <button type="button" className={!s.settings.autoOpen ? "on" : ""} onClick={() => act.setAutoOpen(false)}>When I tap Open buzzers</button>
-              <button type="button" className={s.settings.autoOpen ? "on" : ""} onClick={() => act.setAutoOpen(true)}>As soon as the question appears</button>
+              <button type="button" className={buzzMode(s) === "random" ? "on" : ""} onClick={() => act.setBuzzMode("random")}>By surprise, 6 to 9 seconds after the question</button>
+              <button type="button" className={buzzMode(s) === "tap" ? "on" : ""} onClick={() => act.setBuzzMode("tap")}>When I tap Open buzzers</button>
+              <button type="button" className={buzzMode(s) === "instant" ? "on" : ""} onClick={() => act.setBuzzMode("instant")}>Right away</button>
             </div>
           </div>
           <div className="tool-row">
@@ -2027,7 +2144,7 @@ function Phone({ db, room, code, name, onLeave }) {
           >
             {pressed ? "BUZZED!" : open ? "BUZZ" : "WAIT"}
           </button>
-          <p className="muted">{pressed ? "Checking who was first…" : open ? "Press it!" : early ? "Not yet! Wait for the host." : "Get ready. The host opens the buzzers."}</p>
+          <p className="muted">{pressed ? "Checking who was first…" : open ? "Press it!" : early ? "Not yet! Wait for the host." : (f.autoAt ? "Get ready… the buzzer lights up any second!" : "Get ready. The host opens the buzzers.")}</p>
         </div>, { cls: "phone-buzz" }
       );
     }
@@ -2094,6 +2211,175 @@ function AnswerBox({ s, rec, send, label }) {
       </label>
       <button type="submit" className="btn btn-gold btn-big w-full" disabled={!clean(text)}>Send answer</button>
     </form>
+  );
+}
+
+function Remote({ db, code, pin, onLeave }) {
+  const pid = useMemo(myPid, []);
+  const recRef = useRef({ pid, code, name: "Host remote", remote: true, pin, v: 0, cmd: null });
+  const docRef = useMemo(() => db.doc(`rooms/${code}/players/${pid}`), [db, code, pid]);
+  const write = useWriter(docRef, () => {});
+  const { state: s, status } = useRoomState(db, code, true);
+  const players = usePlayers(db, null, code, false);
+  const [ask, setAsk] = useState("");
+  const [waitedLong, setWaitedLong] = useState(false);
+  const send = useCallback((patch) => {
+    const next = { ...recRef.current, ...patch, v: Math.max((recRef.current.v || 0) + 1, Date.now()), ts: Date.now() };
+    recRef.current = next;
+    write(next);
+  }, [write]);
+  useEffect(() => { send({}); const t = setTimeout(() => setWaitedLong(true), 6000); return () => clearTimeout(t); }, []);
+  const cmd = (type, arg, extra = {}) => {
+    send({ cmd: { id: rid(), type, arg: arg ?? null, at: Date.now(), ...extra } });
+    try { navigator.vibrate && navigator.vibrate(20); } catch (e) {}
+  };
+
+  const shell = (body) => (
+    <div className="screen phone remote">
+      <header className="phone-header">
+        <span className="display brand-sm">Host remote</span>
+        <span className="muted text-sm">Game {code}</span>
+      </header>
+      <main className="remote-main">{body}</main>
+      <footer className="phone-footer">
+        <button type="button" className="chip" onClick={() => cmd("undo")} disabled={!s || !(s.remotes || {})[pid]}>↶ Undo</button>
+        <button type="button" className="chip" onClick={onLeave}>Leave remote</button>
+      </footer>
+    </div>
+  );
+
+  if (!s) {
+    return shell(
+      <div className="phone-card">
+        <p className="pulse text-xl">{status === "missing" ? `No game called ${code}. Check the code on the TV.` : "Connecting…"}</p>
+        {status === "missing" && <Btn onClick={onLeave}>Back</Btn>}
+      </div>
+    );
+  }
+  if (!(s.remotes || {})[pid]) {
+    return shell(
+      <div className="phone-card">
+        <p className="pulse text-xl">Connecting to the TV…</p>
+        {waitedLong && <p>Still waiting. Check the PIN in Host tools on the TV, and that the TV has game {code} open.</p>}
+        {waitedLong && <Btn kind="ghost" onClick={onLeave}>Try a different PIN</Btn>}
+      </div>
+    );
+  }
+
+  const f = s.face;
+  const answering = s.phase === "faceoff" && f && (f.stage === "answer1" || f.stage === "answer2");
+  const canTap = (answering && !s.openQ) || s.phase === "round" || s.phase === "steal";
+  const st = standings(s);
+  const typedRec = answering ? players[f.answering] : null;
+  const typedNow = typedRec && typedRec.answer?.id === s.turn?.id ? clean(typedRec.answer.text, 40) : "";
+
+  let main = null;
+  if (s.phase === "lobby") {
+    main = (
+      <>
+        <p className="remote-status">{activeIds(s).length} players joined</p>
+        <Btn big onClick={() => cmd("start")} disabled={activeIds(s).length < 2}>Start the game</Btn>
+      </>
+    );
+  } else if (s.phase === "pick" || s.phase === "roundEnd") {
+    const last = s.roundNo >= s.settings.rounds && s.phase === "roundEnd";
+    main = (
+      <>
+        {s.last && <p className="remote-status"><LastResult s={s} /></p>}
+        {last ? <Btn big onClick={() => cmd("finish")}>Crown the winner</Btn> : (
+          <>
+            <p className="setting-label">Round {s.roundNo + 1}</p>
+            <Btn big onClick={() => cmd("next", "mine")}>My next question</Btn>
+            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (clean(ask)) { cmd("next", "ask", { text: clean(ask, 120) }); setAsk(""); } }}>
+              <input id="remote-ask" className="input" value={ask} maxLength={120} onChange={(e) => setAsk(e.target.value)} placeholder="Type a question to ask" />
+              <button type="submit" className="btn btn-gold" disabled={!clean(ask)}>Ask</button>
+            </form>
+            <div className="remote-two">
+              <Btn kind="blue" onClick={() => cmd("next", "builtin")}>Ready-made board</Btn>
+              <Btn kind="ghost" onClick={() => cmd("next", "survey")}>Family survey</Btn>
+            </div>
+          </>
+        )}
+      </>
+    );
+  } else if (s.phase === "survey") {
+    main = (
+      <>
+        <p className="remote-status">Family survey is running</p>
+        <Btn big onClick={() => cmd("closeSurvey")}>Close the survey now</Btn>
+        <Btn kind="ghost" onClick={() => cmd("extend")}>+15 seconds</Btn>
+      </>
+    );
+  } else if (s.phase === "faceoff") {
+    main = (
+      <>
+        <p className="remote-status">{nameOf(s, f.p1)} vs {nameOf(s, f.p2)}</p>
+        {f.stage === "ready" && f.autoAt && <p className="pulse text-center">Buzzers open by surprise in a few seconds…</p>}
+        {f.stage === "ready" && <Btn big onClick={() => cmd("open")}>{f.autoAt ? "Open now" : "Open buzzers"}</Btn>}
+        {f.stage === "open" && <><p className="pulse text-lg text-center">Buzzers open. Waiting…</p><Btn kind="ghost" onClick={() => cmd("reset")}>Reset buzzers</Btn></>}
+        {answering && (
+          <p className="text-lg text-center">
+            <b className="gold">{nameOf(s, f.answering)}</b> is answering
+            {typedNow ? <> and typed <b className="gold">“{typedNow}”</b></> : null}
+          </p>
+        )}
+        {answering && s.openQ && (
+          <div className="remote-two">
+            <Btn big onClick={() => cmd("correct")}>Correct</Btn>
+            <Btn kind="red" big onClick={() => cmd("strike")}>Wrong</Btn>
+          </div>
+        )}
+        {answering && !s.openQ && <Btn kind="red" big onClick={() => cmd("strike")}>Not on the board</Btn>}
+        {s.openQ && f.stage === "ready" && s.note && <Btn kind="ghost" onClick={() => cmd("nobody")}>Nobody got it, move on</Btn>}
+      </>
+    );
+  } else if (s.phase === "round") {
+    main = (
+      <>
+        <p className="remote-status">{sideName(s, s.control)} is guessing · {s.strikes} {s.strikes === 1 ? "strike" : "strikes"}</p>
+        <Btn kind="red" big onClick={() => cmd("strike")}>Strike</Btn>
+        {s.strikes === 0 && s.board.filter((c) => c.r).length <= 1 && <Btn kind="ghost" onClick={() => cmd("pass")}>Pass to {sideName(s, otherSide(s, s.control))}</Btn>}
+      </>
+    );
+  } else if (s.phase === "steal") {
+    main = (
+      <>
+        <p className="remote-status">{sideName(s, s.stealSide)} can steal {s.bank}</p>
+        <Btn kind="red" big onClick={() => cmd("strike")}>Steal missed</Btn>
+      </>
+    );
+  } else if (s.phase === "final") {
+    main = (
+      <>
+        <p className="remote-status">Game over! {st[0]?.name} wins.</p>
+        <Btn big onClick={() => cmd("again")}>Play again</Btn>
+      </>
+    );
+  }
+
+  return shell(
+    <>
+      {s.question && s.phase !== "pick" && s.phase !== "lobby" && <p className="remote-q">{s.question}</p>}
+      {s.typed && ["faceoff", "round", "steal", "roundEnd"].includes(s.phase) && (
+        <div className={"typed small " + s.typed.verdict}>
+          {s.typed.name}: “{s.typed.text}” {s.typed.verdict === "hit" ? "✓ matched" : s.typed.verdict === "dup" ? "already up" : s.typed.verdict === "override" ? "you're deciding" : "✕ no match"}
+          {s.typed.verdict !== "override" && <button type="button" className="chip override" onClick={() => cmd("override")}>Override</button>}
+        </div>
+      )}
+      <div className="remote-actions">{main}</div>
+      {s.board.length > 0 && s.phase !== "pick" && (
+        <div className="answer-key">
+          <p className="setting-label">Answer key{canTap ? " · tap to flip" : ""}</p>
+          {s.board.map((c, i) => (
+            <button key={i} type="button" className={"key-row" + (c.r ? " done" : "")} disabled={!canTap || c.r} onClick={() => cmd("tap", i)}>
+              <span className="key-n">{i + 1}</span><span className="key-t">{c.t}</span><b>{c.p}</b>
+            </button>
+          ))}
+          {s.phase !== "roundEnd" && <p className="muted text-sm">Bank: {s.bank}</p>}
+        </div>
+      )}
+      <div className="remote-scores">{st.map((x) => <span key={x.side}>{x.name} <b>{x.score}</b></span>)}</div>
+    </>
   );
 }
 
@@ -2169,6 +2455,8 @@ function App() {
     try {
       const p = JSON.parse(local.get("lf-player") || "null");
       if (p && /^[A-Z]{4}$/.test(p.code) && p.name) return { kind: "phone", code: p.code, name: p.name };
+      const r = JSON.parse(local.get("lf-remote") || "null");
+      if (r && /^[A-Z]{4}$/.test(r.code) && /^\d{4}$/.test(r.pin)) return { kind: "remote", code: r.code, pin: r.pin };
     } catch (e) {}
     return { kind: "landing" };
   });
@@ -2210,8 +2498,9 @@ function App() {
   if (busy) return <div className="screen center"><p className="pulse text-2xl">{busy}</p></div>;
   if (mode.kind === "host") return <Host db={db} room={room} code={mode.code} initial={mode.initial} onExit={() => { local.del("lf-host-code"); setMode({ kind: "landing" }); }} />;
   if (mode.kind === "phone") return <Phone db={db} room={room} code={mode.code} name={mode.name} onLeave={() => setMode({ kind: "landing" })} />;
+  if (mode.kind === "remote") return <Remote db={db} code={mode.code} pin={mode.pin} onLeave={() => { local.del("lf-remote"); setMode({ kind: "landing" }); }} />;
   if (mode.kind === "prep") return <Prep db={db} onBack={() => setMode({ kind: "landing" })} onHost={() => host(null)} />;
-  return <Landing db={db} onHost={() => host(null)} onResume={(c) => host(c)} onPrep={() => setMode({ kind: "prep" })} onJoin={(code, name) => setMode({ kind: "phone", code, name })} />;
+  return <Landing db={db} onHost={() => host(null)} onResume={(c) => host(c)} onPrep={() => setMode({ kind: "prep" })} onRemote={(code, pin) => { local.set("lf-remote", JSON.stringify({ code, pin })); setMode({ kind: "remote", code, pin }); }} onJoin={(code, name) => setMode({ kind: "phone", code, name })} />;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
