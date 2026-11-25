@@ -253,6 +253,33 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
 .score-table .rank { font-family: var(--display); color: var(--sky); font-weight: 400; }
 .score-table.inline li { font-size: 1.1rem; padding: 8px 12px; }
 .round-scores { display: none; }
+.chip-tools { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+.drawer-layer { position: fixed; inset: 0; z-index: 80; }
+.drawer-backdrop { position: absolute; inset: 0; background: rgba(3,8,30,.6); }
+.drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(620px, 100%); overflow-y: auto; box-sizing: border-box; background: var(--navy); border-left: 3px solid var(--gold); padding: calc(16px + env(safe-area-inset-top, 0px)) max(18px, env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) 18px; display: flex; flex-direction: column; gap: 14px; box-shadow: -20px 0 60px rgba(0,0,0,.5); }
+.drawer-head { display: flex; align-items: center; gap: 10px; }
+.drawer-head h2 { font-size: 2rem; color: var(--gold); margin-right: auto; }
+.flash { color: var(--gold); font-weight: 700; }
+.tool-sec { border-top: 1.5px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.tool-sec h3 { font-family: var(--display); font-size: 1.35rem; color: var(--sky); }
+.tool-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tool-label { font-weight: 700; color: var(--muted); width: 100%; }
+.tool-name { font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+.score-adjust .tool-name { flex: 1 1 140px; }
+.tool-score { font-family: var(--display); font-weight: 400; color: var(--gold); font-size: 1.5rem; min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+.select { font: 600 1rem var(--body); padding: .55em .7em; border-radius: 12px; border: 2px solid var(--line); background: #ffffff; color: var(--ink); max-width: 100%; min-width: 0; flex: 1 1 180px; }
+.tool-players { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tool-players li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tool-players .tool-name { flex: 1 1 120px; }
+.seg button:disabled { opacity: .4; cursor: not-allowed; }
+.qform { display: flex; flex-direction: column; gap: 10px; }
+.qrows { display: grid; grid-template-columns: 1fr 5.5em; gap: 6px; }
+.qrows .input { font-size: 1rem; padding: .5em .7em; }
+.qhead { font-size: .8rem; text-transform: uppercase; letter-spacing: .1em; color: var(--sky); font-weight: 700; }
+.qlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.qlist li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: rgba(255,255,255,.06); border-radius: 12px; padding: 10px 12px; }
+.qtext { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.qbtns { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .final-main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; position: relative; z-index: 2; }
 .winner { font-size: clamp(3rem, 9vw, 8rem); color: var(--gold); text-shadow: 0 6px 0 var(--gold-deep), 0 16px 40px rgba(0,0,0,.5); animation: pop .8s cubic-bezier(.3,1.6,.5,1) both; }

@@ -164,27 +164,44 @@ function pickQuestion(s) {
   return idx;
 }
 
-function beginRound(s, kind, customText) {
-  s.roundNo += 1;
+const AUTO_PTS = [32, 24, 16, 11, 8, 5, 4];
+
+// kind: "builtin" | "survey" | "custom" | "mine". opts: { text, idx, item, mode, replace }
+function beginRound(s, kind, opts = {}) {
+  if (!opts.replace) s.roundNo += 1;
+  s.roundNo = Math.max(1, s.roundNo);
   s.roundKey = rid();
   Object.assign(s, { bank: 0, strikes: 0, control: null, controlPid: null, stealSide: null, last: null, sharp: [], note: "" });
+  let board = null;
   if (kind === "custom") {
-    s.question = clean(customText, 120);
+    s.question = clean(opts.text, 120);
     s.fallbackQ = null;
+  } else if (kind === "mine") {
+    const it = opts.item;
+    s.question = clean(it.q, 120);
+    s.fallbackQ = null;
+    s.usedMine = [...(s.usedMine || []).filter((x) => x !== it.id), it.id];
+    if (opts.mode !== "survey" && Array.isArray(it.a) && it.a.length) {
+      board = it.a.map(([t, p]) => ({ t: clean(t, 32), p: Math.max(0, Number(p) || 0), r: false }));
+    }
   } else {
-    const idx = pickQuestion(s);
+    let idx = opts.idx;
+    if (Number.isInteger(idx) && QUESTIONS[idx]) { if (!s.usedQ.includes(idx)) s.usedQ.push(idx); }
+    else idx = pickQuestion(s);
     s.question = QUESTIONS[idx].q;
     s.fallbackQ = idx;
+    if (kind === "builtin") board = QUESTIONS[idx].a.map(([t, p]) => ({ t, p, r: false }));
   }
   s.source = kind;
-  if (kind === "builtin") {
-    s.board = QUESTIONS[s.fallbackQ].a.map(([t, p]) => ({ t, p, r: false }));
+  if (board) {
+    s.board = board;
     setupFaceoff(s);
   } else {
+    const total = (s.settings.surveySec || 30) * 1000;
     s.board = [];
     s.face = null;
     s.buzz = null;
-    s.survey = { id: rid(), endsAt: Date.now() + SURVEY_MS, done: false, empty: false };
+    s.survey = { id: rid(), endsAt: Date.now() + total, total, done: false, empty: false };
     s.phase = "survey";
   }
 }
@@ -529,11 +546,11 @@ function SoundToggle() {
   );
 }
 
-function Countdown({ endsAt, now, big }) {
+function Countdown({ endsAt, now, big, total = SURVEY_MS }) {
   const [, force] = useState(0);
   useEffect(() => { const t = setInterval(() => force((x) => x + 1), 200); return () => clearInterval(t); }, []);
   const left = Math.max(0, Math.ceil((endsAt - now()) / 1000));
-  const frac = Math.max(0, Math.min(1, (endsAt - now()) / SURVEY_MS));
+  const frac = Math.max(0, Math.min(1, (endsAt - now()) / total));
   return (
     <div className={"countdown" + (big ? " big" : "")}>
       <div className="count-num">{left}</div>
@@ -646,6 +663,8 @@ function Host({ db, room, code, initial, onExit }) {
   const [custom, setCustom] = useState("");
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [peek, setPeek] = useState(local.get("lf-peek") !== "off");
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [library, saveLibrary, libErr] = useLibrary(db);
   const docRef = useMemo(() => db.doc("rooms/" + code), [db, code]);
   const write = useWriter(docRef, setSyncErr);
   const fast = s.phase === "faceoff" && s.face?.stage === "open";
@@ -894,10 +913,57 @@ function Host({ db, room, code, initial, onExit }) {
     d.fx = fx("fanfare");
   });
 
+  const nextMine = library.find((it) => !(s.usedMine || []).includes(it.id));
   const nextRound = (kind) => {
     if (kind === "custom" && !clean(custom, 120)) return;
-    commit((d) => beginRound(d, kind, custom));
+    if (kind === "mine" && !nextMine) return;
+    commit((d) => beginRound(d, kind, { text: custom, item: nextMine }));
     if (kind === "custom") setCustom("");
+  };
+
+  /* ---- host overrides ---- */
+  const live = s.phase === "faceoff" || s.phase === "round" || s.phase === "steal" || s.phase === "survey";
+  const act = {
+    adjustScore: (side, delta) => commit((d) => { d.scores[side] = (d.scores[side] || 0) + delta; }),
+    giveControlTo: (side) => commit((d) => {
+      d.control = side;
+      d.controlPid = null;
+      d.stealSide = null;
+      d.phase = "round";
+      if (d.face) { d.face.stage = "done"; if (!d.face.p1 || !d.face.p2) d.face = { ...d.face }; }
+      if (d.buzz) d.buzz.open = false;
+      if (d.strikes >= 3) d.strikes = 0;
+      d.note = `${sideName(d, side)} has control`;
+    }),
+    awardBank: (side) => commit((d) => endRound(d, side, "host", playersRef.current)),
+    revealFree: (i) => commit((d) => { if (d.board[i] && !d.board[i].r) { d.board[i].r = true; d.board[i].late = true; d.fx = fx("flip"); } }),
+    setStrikes: (n) => commit((d) => {
+      d.strikes = n;
+      if (d.phase === "steal") { d.phase = "round"; d.stealSide = null; }
+    }),
+    skipRound: () => commit((d) => {
+      d.roundNo = Math.max(0, d.roundNo - 1);
+      Object.assign(d, { phase: "pick", board: [], face: null, buzz: null, survey: null, last: null, bank: 0, strikes: 0, question: "", control: null, stealSide: null, note: "" });
+    }),
+    setFace: (slot, pid) => commit((d) => {
+      if (d.phase !== "faceoff" || !d.face) return;
+      const other = slot === "p1" ? "p2" : "p1";
+      if (d.face[other] === pid) d.face[other] = d.face[slot];
+      d.face[slot] = pid;
+      d.face.stage = "ready";
+      d.face.first = null;
+      d.face.answering = null;
+      d.buzz = { id: rid(), open: false, winner: null, times: null };
+    }),
+    playQuestion: (choice, mode) => commit((d) => {
+      const replace = d.phase === "faceoff" || d.phase === "round" || d.phase === "steal" || d.phase === "survey";
+      if (choice.kind === "mine") beginRound(d, "mine", { item: choice.item, mode, replace });
+      else beginRound(d, mode === "survey" ? "survey" : "builtin", { idx: choice.idx, replace });
+    }),
+    setRounds: (n) => commit((d) => { d.settings.rounds = Math.max(Math.max(1, d.roundNo), Math.min(30, n)); }, { noUndo: true }),
+    setSurveySec: (n) => commit((d) => { d.settings.surveySec = n; }, { noUndo: true }),
+    movePlayer: (pid) => commit((d) => { d.assign[pid] = teamOf(d, pid) === "A" ? "B" : "A"; }),
+    kick: (pid) => commit((d) => { d.kicked[pid] = playersRef.current[pid]?.v || Date.now(); }),
   };
 
   const finishGame = () => commit((d) => {
@@ -934,6 +1000,7 @@ function Host({ db, room, code, initial, onExit }) {
         <SoundToggle />
         <button type="button" className="chip" aria-pressed={peek} title="Faint answer hints on hidden cards, for the host"
           onClick={() => { setPeek(!peek); local.set("lf-peek", peek ? "off" : "on"); }}>{peek ? "Hints on" : "Hints off"}</button>
+        <button type="button" className="chip chip-tools" onClick={() => setToolsOpen(true)}>⚙ Host tools</button>
         <button type="button" className="chip" onClick={undo} disabled={!undoStack.current.length}>↶ Undo</button>
         {s.phase !== "lobby" && s.phase !== "final" && (
           confirmEnd
@@ -941,6 +1008,10 @@ function Host({ db, room, code, initial, onExit }) {
             : <button type="button" className="chip" onClick={() => setConfirmEnd(true)}>End game</button>
         )}
       </div>
+      {toolsOpen && ReactDOM.createPortal(
+        <HostTools s={s} act={act} live={live} library={library} saveLibrary={saveLibrary} libErr={libErr} onClose={() => setToolsOpen(false)} />,
+        document.body
+      )}
     </header>
   );
 
@@ -1087,7 +1158,7 @@ function Host({ db, room, code, initial, onExit }) {
         <span className="gold">{sideName(s, s.last.side)}</span> {s.last.how === "steal" ? "stole" : "banked"} <span className="gold">{s.last.pts}</span> points!
         {s.sharp?.length > 0 && <div className="sharp">Sharp guessers on the phones: {s.sharp.join(", ")}</div>}
       </div>
-    ) : <div className="status-big">Get ready for round 1!</div>;
+    ) : <div className="status-big">Get ready for round {s.roundNo + 1}!</div>;
     controls = last && s.phase === "roundEnd" ? (
       <Btn big onClick={finishGame}>Crown the winner</Btn>
     ) : (
@@ -1095,6 +1166,7 @@ function Host({ db, room, code, initial, onExit }) {
         <span className="pick-label">Round {s.roundNo + 1}:</span>
         <Btn big onClick={() => nextRound("builtin")}>Ready-made board</Btn>
         <Btn kind="blue" big onClick={() => nextRound("survey")}>Family survey</Btn>
+        {library.length > 0 && <Btn kind="ghost" big onClick={() => nextRound("mine")} disabled={!nextMine}>My question{nextMine ? ` (${library.filter((it) => !(s.usedMine || []).includes(it.id)).length} left)` : "s all played"}</Btn>}
         <form className="custom-q" onSubmit={(e) => { e.preventDefault(); nextRound("custom"); }}>
           <input id="custom-q" className="input" value={custom} maxLength={120} onChange={(e) => setCustom(e.target.value)} placeholder="Or type your own question…" />
           <button type="submit" className="btn btn-ghost" disabled={!clean(custom)}>Ask the family</button>
@@ -1108,7 +1180,7 @@ function Host({ db, room, code, initial, onExit }) {
     ) : (
       <div className="survey-status">
         <p className="eyebrow">Family survey · answer on your phone</p>
-        <Countdown endsAt={s.survey.endsAt} now={Date.now} big />
+        <Countdown endsAt={s.survey.endsAt} now={Date.now} total={s.survey.total || SURVEY_MS} big />
         <p className="status-mid">{count} of {ids.length} answers in</p>
       </div>
     );
@@ -1280,6 +1352,295 @@ function Host({ db, room, code, initial, onExit }) {
         <div className="round-scores"><ScoreTable st={st} inline /></div>
       )}
       <footer className="host-controls">{controls}</footer>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Host tools: overrides, question picker, my questions                */
+/* ------------------------------------------------------------------ */
+
+function sanitizeItems(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((it) => it && typeof it.id === "string" && clean(it.q)).slice(0, 200).map((it) => ({
+    id: it.id.slice(0, 20),
+    q: clean(it.q, 120),
+    a: Array.isArray(it.a) ? it.a.filter((r) => Array.isArray(r) && clean(r[0])).slice(0, 7).map(([t, p]) => [clean(t, 32), Math.max(0, Math.min(999, Number(p) || 0))]) : [],
+  }));
+}
+
+function useLibrary(db) {
+  const [items, setItems] = useState([]);
+  const [err, setErr] = useState(null);
+  const ref = useMemo(() => db.doc("library/questions"), [db]);
+  const write = useWriter(ref, setErr);
+  const dirty = useRef(false);
+  useEffect(() => {
+    const unsub = ref.onSnapshot((sn) => {
+      if (dirty.current && sn.metadata?.hasPendingWrites) return;
+      if (sn.exists) setItems(sanitizeItems(sn.data()?.items));
+    }, () => {});
+    return unsub;
+  }, [ref]);
+  const save = useCallback((next) => {
+    dirty.current = true;
+    const clean2 = sanitizeItems(next);
+    setItems(clean2);
+    write({ items: clean2 });
+  }, [write]);
+  return [items, save, err];
+}
+
+function HostTools({ s, act, live, library, saveLibrary, libErr, onClose }) {
+  const isTeams = s.settings.mode === "teams";
+  const ids = activeIds(s);
+  const sideList = sides(s);
+  const inPlay = s.phase === "faceoff" || s.phase === "round" || s.phase === "steal";
+  const [qPick, setQPick] = useState("");
+  const [qMode, setQMode] = useState("board");
+  const [confirmSkip, setConfirmSkip] = useState(false);
+  const [flash, setFlash] = useState("");
+  const done = (m) => { setFlash(m); setTimeout(() => setFlash(""), 1800); };
+  useEffect(() => {
+    const k = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+
+  const choice = qPick.startsWith("m:")
+    ? { kind: "mine", item: library.find((it) => it.id === qPick.slice(2)) }
+    : qPick.startsWith("b:") ? { kind: "builtin", idx: Number(qPick.slice(2)) } : null;
+  const mineNoBoard = choice?.kind === "mine" && !(choice.item?.a?.length);
+  const canPlay = choice && (choice.kind !== "mine" || choice.item) && s.phase !== "lobby" && s.phase !== "final";
+
+  return (
+    <div className="drawer-layer">
+      <div className="drawer-backdrop" onClick={onClose} />
+      <aside className="drawer" role="dialog" aria-label="Host tools">
+        <div className="drawer-head">
+          <h2 className="display">Host tools</h2>
+          {flash && <span className="flash">{flash}</span>}
+          <button type="button" className="chip" onClick={onClose}>Close</button>
+        </div>
+        <p className="muted text-sm">Everything here changes the live game for everyone. Made a mistake? Use Undo.</p>
+
+        {s.phase !== "lobby" && (
+          <section className="tool-sec">
+            <h3>Scores</h3>
+            {sideList.map((side) => (
+              <div key={side} className="tool-row score-adjust">
+                <span className="tool-name">{sideName(s, side)}</span>
+                <b className="tool-score">{s.scores[side] || 0}</b>
+                {[-10, -1, 1, 10].map((n) => (
+                  <button key={n} type="button" className="chip" onClick={() => act.adjustScore(side, n)}>{n > 0 ? "+" + n : "−" + Math.abs(n)}</button>
+                ))}
+              </div>
+            ))}
+          </section>
+        )}
+
+        {inPlay && (
+          <section className="tool-sec">
+            <h3>This round</h3>
+            {s.phase === "faceoff" && s.face && (
+              <div className="tool-row">
+                <span className="tool-label">Face-off players</span>
+                {["p1", "p2"].map((slot) => (
+                  <select key={slot} id={"tool-face-" + slot} className="select" value={s.face[slot] || ""} onChange={(e) => act.setFace(slot, e.target.value)}>
+                    {ids.map((p) => <option key={p} value={p}>{nameOf(s, p)}{isTeams ? ` (${teamName(s, teamOf(s, p))})` : ""}</option>)}
+                  </select>
+                ))}
+              </div>
+            )}
+            <div className="tool-row">
+              <span className="tool-label">Give control to</span>
+              {sideList.map((side) => (
+                <button key={side} type="button" className={"chip" + (s.control === side && s.phase !== "faceoff" ? " chip-on" : "")} onClick={() => { act.giveControlTo(side); done("Control given"); }}>{sideName(s, side)}</button>
+              ))}
+            </div>
+            <div className="tool-row">
+              <span className="tool-label">End round now, bank of {s.bank} goes to</span>
+              {sideList.map((side) => (
+                <button key={side} type="button" className="chip" onClick={() => { act.awardBank(side); onClose(); }}>{sideName(s, side)}</button>
+              ))}
+            </div>
+            {s.phase !== "faceoff" && (
+              <div className="tool-row">
+                <span className="tool-label">Strikes</span>
+                {[0, 1, 2].map((n) => (
+                  <button key={n} type="button" className={"chip" + (s.strikes === n && s.phase === "round" ? " chip-on" : "")} onClick={() => act.setStrikes(n)}>{n}</button>
+                ))}
+              </div>
+            )}
+            {s.board.some((c) => !c.r) && (
+              <div className="tool-row">
+                <span className="tool-label">Show a card without points</span>
+                {s.board.map((c, i) => !c.r && (
+                  <button key={i} type="button" className="chip" onClick={() => act.revealFree(i)}>{i + 1}. {c.t}</button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+        {(inPlay || s.phase === "survey") && (
+          <section className="tool-sec">
+            {confirmSkip
+              ? <div className="tool-row"><span className="tool-label">Throw this round away? Nobody scores.</span>
+                  <button type="button" className="chip chip-warn" onClick={() => { act.skipRound(); setConfirmSkip(false); onClose(); }}>Yes, skip it</button>
+                  <button type="button" className="chip" onClick={() => setConfirmSkip(false)}>No</button></div>
+              : <button type="button" className="chip" onClick={() => setConfirmSkip(true)}>Skip this round (no points)</button>}
+          </section>
+        )}
+
+        <section className="tool-sec">
+          <h3>{live ? "Switch to a different question" : "Choose the next question"}</h3>
+          <select id="tool-q" className="select w-full" value={qPick} onChange={(e) => setQPick(e.target.value)}>
+            <option value="">Pick a question…</option>
+            {library.length > 0 && (
+              <optgroup label="My questions">
+                {library.map((it) => <option key={it.id} value={"m:" + it.id}>{(s.usedMine || []).includes(it.id) ? "✓ " : ""}{it.q}</option>)}
+              </optgroup>
+            )}
+            <optgroup label="Built-in questions">
+              {QUESTIONS.map((q, i) => <option key={i} value={"b:" + i}>{s.usedQ.includes(i) ? "✓ " : ""}{q.q}</option>)}
+            </optgroup>
+          </select>
+          <div className="tool-row">
+            <div className="seg">
+              <button type="button" className={qMode === "board" && !mineNoBoard ? "on" : ""} disabled={mineNoBoard} onClick={() => setQMode("board")}>With its answers</button>
+              <button type="button" className={qMode === "survey" || mineNoBoard ? "on" : ""} onClick={() => setQMode("survey")}>Family survey builds the board</button>
+            </div>
+          </div>
+          <div className="tool-row">
+            <Btn onClick={() => { act.playQuestion(choice, mineNoBoard ? "survey" : qMode); setQPick(""); onClose(); }} disabled={!canPlay}>
+              {live ? "Switch to it now" : "Play it now"}
+            </Btn>
+            {s.phase === "lobby" && <span className="muted text-sm">Start the game first.</span>}
+            {live && <span className="muted text-sm">Replaces the current round. Nobody scores for it.</span>}
+          </div>
+          <p className="muted text-sm">✓ means already played in this game.</p>
+        </section>
+
+        <section className="tool-sec">
+          <h3>Game settings</h3>
+          <div className="tool-row">
+            <span className="tool-label">Rounds</span>
+            <div className="stepper">
+              <button type="button" onClick={() => act.setRounds(s.settings.rounds - 1)} aria-label="Fewer rounds">−</button>
+              <b>{s.settings.rounds}</b>
+              <button type="button" onClick={() => act.setRounds(s.settings.rounds + 1)} aria-label="More rounds">+</button>
+            </div>
+          </div>
+          <div className="tool-row">
+            <span className="tool-label">Survey time</span>
+            <div className="seg">
+              {[15, 30, 45, 60].map((n) => (
+                <button key={n} type="button" className={(s.settings.surveySec || 30) === n ? "on" : ""} onClick={() => act.setSurveySec(n)}>{n}s</button>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {s.phase !== "lobby" && ids.length > 0 && (
+          <section className="tool-sec">
+            <h3>Players</h3>
+            <ul className="tool-players">
+              {ids.map((p) => (
+                <li key={p}>
+                  <span className="tool-name">{nameOf(s, p)}</span>
+                  {isTeams && <button type="button" className="chip" onClick={() => act.movePlayer(p)}>Move to {teamName(s, teamOf(s, p) === "A" ? "B" : "A")}</button>}
+                  <button type="button" className="chip" onClick={() => act.kick(p)}>Remove</button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        <section className="tool-sec">
+          <h3>My questions</h3>
+          <QuestionLibrary items={library} save={saveLibrary} used={s.usedMine || []} err={libErr} />
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+const blankForm = () => ({ id: null, q: "", rows: Array.from({ length: 7 }, () => ({ t: "", p: "" })) });
+
+function QuestionLibrary({ items, save, used, err }) {
+  const [f, setF] = useState(blankForm);
+  const [msg, setMsg] = useState("");
+  const [del, setDel] = useState(null);
+  const setRow = (i, k, v) => setF((x) => ({ ...x, rows: x.rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)) }));
+  const submit = (e) => {
+    e.preventDefault();
+    const q = clean(f.q, 120);
+    if (!q) { setMsg("Type a question first."); return; }
+    const rows = f.rows.map((r) => ({ t: clean(r.t, 32), p: String(r.p).trim() === "" ? null : Math.round(Number(r.p)) })).filter((r) => r.t);
+    if (rows.length === 1) { setMsg("Add at least 2 answers, or leave them all empty so the family survey builds the board."); return; }
+    const auto = rows.some((r) => r.p === null || !Number.isFinite(r.p));
+    const a = rows.map((r, i) => [r.t, auto ? AUTO_PTS[i] : Math.max(0, Math.min(999, r.p))]).sort((x, y) => y[1] - x[1]);
+    const item = { id: f.id || "q" + rid(), q, a };
+    save(f.id ? items.map((it) => (it.id === f.id ? item : it)) : [...items, item]);
+    setF(blankForm());
+    setMsg(f.id ? "Question updated." : "Question saved.");
+  };
+  const edit = (it) => {
+    const rows = blankForm().rows.map((r, i) => (it.a[i] ? { t: it.a[i][0], p: String(it.a[i][1]) } : r));
+    setF({ id: it.id, q: it.q, rows });
+    setMsg("Editing. Save to keep your changes.");
+  };
+  const move = (i, d) => {
+    const j = i + d;
+    if (j < 0 || j >= items.length) return;
+    const next = items.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    save(next);
+  };
+  return (
+    <div className="qlib">
+      <form className="qform" onSubmit={submit}>
+        <label className="field">
+          <span>Question</span>
+          <input id="myq-text" className="input" value={f.q} maxLength={120} onChange={(e) => setF({ ...f, q: e.target.value })} placeholder="Name something Uncle Shlomo always brings to the party" />
+        </label>
+        <div className="qrows">
+          <span className="qhead">Answers, top answer first</span><span className="qhead">Points</span>
+          {f.rows.map((r, i) => (
+            <React.Fragment key={i}>
+              <input id={"myq-a" + i} className="input" value={r.t} maxLength={32} onChange={(e) => setRow(i, "t", e.target.value)} placeholder={`Answer ${i + 1}`} aria-label={`Answer ${i + 1}`} />
+              <input id={"myq-p" + i} className="input" value={r.p} inputMode="numeric" maxLength={3} onChange={(e) => setRow(i, "p", e.target.value.replace(/[^0-9]/g, ""))} placeholder={String(AUTO_PTS[i])} aria-label={`Points for answer ${i + 1}`} />
+            </React.Fragment>
+          ))}
+        </div>
+        <p className="muted text-sm">Leave the points empty to score them in the order you typed. Leave every answer empty and the family survey builds the board when you play it.</p>
+        <div className="tool-row">
+          <Btn type="submit">{f.id ? "Save changes" : "Save question"}</Btn>
+          {(f.id || f.q) && <button type="button" className="chip" onClick={() => { setF(blankForm()); setMsg(""); }}>{f.id ? "Cancel editing" : "Clear"}</button>}
+          {msg && <span className="flash">{msg}</span>}
+        </div>
+        {err === "invalid_argument" && <p className="err">Couldn't save. Only the game's owner or an Editor can save questions.</p>}
+      </form>
+      {items.length > 0 ? (
+        <ol className="qlist">
+          {items.map((it, i) => (
+            <li key={it.id}>
+              <div className="qtext">
+                <b>{used.includes(it.id) ? "✓ " : ""}{it.q}</b>
+                <span className="muted text-sm">{it.a.length ? it.a.map((r) => `${r[0]} (${r[1]})`).join(" · ") : "Family survey builds the board"}</span>
+              </div>
+              <div className="qbtns">
+                <button type="button" className="chip" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">↑</button>
+                <button type="button" className="chip" onClick={() => move(i, 1)} disabled={i === items.length - 1} aria-label="Move down">↓</button>
+                <button type="button" className="chip" onClick={() => edit(it)}>Edit</button>
+                {del === it.id
+                  ? <button type="button" className="chip chip-warn" onClick={() => { save(items.filter((x) => x.id !== it.id)); setDel(null); }}>Delete?</button>
+                  : <button type="button" className="chip" onClick={() => setDel(it.id)}>Delete</button>}
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : <p className="muted">No questions yet. They're saved with the game, so they'll still be here on party night.</p>}
     </div>
   );
 }
@@ -1503,7 +1864,7 @@ function SurveyCard({ s, rec, send, hostNow }) {
     <form className="phone-card" onSubmit={submit}>
       <p className="eyebrow">Family survey</p>
       <p className="phone-q big">{s.question}</p>
-      {!s.survey?.empty && <Countdown endsAt={s.survey.endsAt} now={hostNow} />}
+      {!s.survey?.empty && <Countdown endsAt={s.survey.endsAt} now={hostNow} total={s.survey.total || SURVEY_MS} />}
       {s.survey?.empty ? <p className="text-lg">The host is giving everyone a little more time.</p> : null}
       <input id="survey-answer" className="input big-input" value={text} maxLength={32} onChange={(e) => setText(e.target.value)} placeholder="Your answer" disabled={timeUp} autoComplete="off" />
       <button type="submit" className="btn btn-gold btn-big w-full" disabled={timeUp || !clean(text)}>{mine && clean(text) === mine ? "Sent ✓" : mine ? "Change my answer" : "Send answer"}</button>
