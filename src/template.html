@@ -1,4 +1,5 @@
 <title>Latke Feud</title>
+<link rel="artifact-thumbnail" href="thumb.png">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -149,6 +150,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
 .team-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .team-col { border-radius: 16px; padding: 12px; border: 2px solid var(--line); background: rgba(0,0,0,.18); min-width: 0; }
 .team-col h3 { font-size: 1.4rem; margin-bottom: 8px; }
+.team-name-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.team-name-input { flex: 1; min-width: 0; font-size: 1.4rem; color: var(--team, white); background: rgba(0,0,0,.25); border: 2px dashed rgba(255,255,255,.25); border-radius: 10px; padding: 4px 8px; }
+.team-name-input:hover, .team-name-input:focus { border-color: var(--team, white); border-style: solid; }
+.dice { background: rgba(255,255,255,.1); border: 1.5px solid var(--line); border-radius: 10px; font-size: 1.2rem; padding: 4px 8px; cursor: pointer; }
 .team-col ul, .solo-list { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 0; }
 .team-a { --team: var(--sky); }
 .team-b { --team: var(--gold); }

@@ -1,4 +1,5 @@
 <title>Latke Feud</title>
+<link rel="artifact-thumbnail" href="thumb.png">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -149,6 +150,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
 .team-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .team-col { border-radius: 16px; padding: 12px; border: 2px solid var(--line); background: rgba(0,0,0,.18); min-width: 0; }
 .team-col h3 { font-size: 1.4rem; margin-bottom: 8px; }
+.team-name-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.team-name-input { flex: 1; min-width: 0; font-size: 1.4rem; color: var(--team, white); background: rgba(0,0,0,.25); border: 2px dashed rgba(255,255,255,.25); border-radius: 10px; padding: 4px 8px; }
+.team-name-input:hover, .team-name-input:focus { border-color: var(--team, white); border-style: solid; }
+.dice { background: rgba(255,255,255,.1); border: 1.5px solid var(--line); border-radius: 10px; font-size: 1.2rem; padding: 4px 8px; cursor: pointer; }
 .team-col ul, .solo-list { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 0; }
 .team-a { --team: var(--sky); }
 .team-b { --team: var(--gold); }
@@ -513,6 +518,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       hostTs: Date.now(),
       phase: "lobby",
       settings: { rounds: 6, mode: "teams", teamPick: "host" },
+      teamNames: { A: TEAMS.A.name, B: TEAMS.B.name },
       roster: {},
       assign: {},
       kicked: {},
@@ -552,10 +558,25 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     return ((_b = (_a = s.roster) == null ? void 0 : _a[pid]) == null ? void 0 : _b.name) || "Someone";
   };
   var sideOf = (s, pid) => s.settings.mode === "teams" ? teamOf(s, pid) || "A" : pid;
-  var sideName = (s, side) => {
-    var _a;
-    return s.settings.mode === "teams" ? ((_a = TEAMS[side]) == null ? void 0 : _a.name) || "A team" : nameOf(s, side);
+  var teamName = (s, t) => {
+    var _a, _b;
+    return clean((_a = s == null ? void 0 : s.teamNames) == null ? void 0 : _a[t], 24) || ((_b = TEAMS[t]) == null ? void 0 : _b.name) || "A team";
   };
+  var sideName = (s, side) => s.settings.mode === "teams" ? teamName(s, side) : nameOf(s, side);
+  var NAME_IDEAS = [
+    "Team Latke",
+    "Team Sufganiyah",
+    "The Dreidel Spinners",
+    "Gelt Getters",
+    "Oil Be There",
+    "The Maccabees",
+    "Applesauce Army",
+    "Sour Cream Squad",
+    "Shamash Squad",
+    "Eight Crazy Nights",
+    "The Crispy Edges",
+    "Nes Gadol"
+  ];
   function otherSide(s, side) {
     if (s.settings.mode === "teams") return side === "A" ? "B" : "A";
     const f = s.face || {};
@@ -1392,11 +1413,49 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       }, { noUndo: true }) }, "I'll assign"), /* @__PURE__ */ React.createElement("button", { type: "button", className: s.settings.teamPick === "phones" ? "on" : "", onClick: () => commit((d) => {
         d.settings.teamPick = "phones";
         d.assign = {};
-      }, { noUndo: true }) }, "Phones pick")))), isTeams ? /* @__PURE__ */ React.createElement("div", { className: "team-cols" }, ["A", "B"].map((t) => /* @__PURE__ */ React.createElement("div", { key: t, className: "team-col " + TEAMS[t].cls }, /* @__PURE__ */ React.createElement("h3", { className: "display" }, TEAMS[t].name), /* @__PURE__ */ React.createElement("ul", null, byTeam(t).map((p) => /* @__PURE__ */ React.createElement(PlayerChip, { key: p, pid: p }))), !byTeam(t).length && /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "Nobody yet"))), unplaced.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "team-col unplaced" }, /* @__PURE__ */ React.createElement("h3", { className: "display" }, s.settings.teamPick === "host" ? "Tap a name to place" : "Still choosing"), /* @__PURE__ */ React.createElement("ul", null, unplaced.map((p) => /* @__PURE__ */ React.createElement("li", { key: p, className: "player-chip" }, /* @__PURE__ */ React.createElement("span", { className: "player-name" }, nameOf(s, p)), s.settings.teamPick === "host" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { type: "button", className: "mini a", onClick: () => commit((d) => {
+      }, { noUndo: true }) }, "Phones pick")))), isTeams ? /* @__PURE__ */ React.createElement("div", { className: "team-cols" }, ["A", "B"].map((t) => {
+        var _a2, _b2;
+        return /* @__PURE__ */ React.createElement("div", { key: t, className: "team-col " + TEAMS[t].cls }, /* @__PURE__ */ React.createElement("div", { className: "team-name-row" }, /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            id: "team-name-" + t,
+            className: "team-name-input display",
+            value: (_b2 = (_a2 = s.teamNames) == null ? void 0 : _a2[t]) != null ? _b2 : TEAMS[t].name,
+            maxLength: 24,
+            "aria-label": `Name for team ${t === "A" ? "one" : "two"}`,
+            onChange: (e) => {
+              const v = e.target.value.slice(0, 24);
+              commit((d) => {
+                d.teamNames = { ...d.teamNames || {}, [t]: v };
+              }, { noUndo: true });
+            },
+            onBlur: () => {
+              var _a3;
+              if (!clean((_a3 = s.teamNames) == null ? void 0 : _a3[t], 24)) commit((d) => {
+                d.teamNames = { ...d.teamNames || {}, [t]: TEAMS[t].name };
+              }, { noUndo: true });
+            }
+          }
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "dice",
+            title: "Suggest a team name",
+            "aria-label": "Suggest a team name",
+            onClick: () => commit((d) => {
+              const taken = [teamName(d, "A"), teamName(d, "B")];
+              const pool = NAME_IDEAS.filter((n) => !taken.includes(n));
+              d.teamNames = { ...d.teamNames || {}, [t]: pool[Math.floor(Math.random() * pool.length)] };
+            }, { noUndo: true })
+          },
+          "\u{1F3B2}"
+        )), /* @__PURE__ */ React.createElement("ul", null, byTeam(t).map((p) => /* @__PURE__ */ React.createElement(PlayerChip, { key: p, pid: p }))), !byTeam(t).length && /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "Nobody yet"));
+      }), unplaced.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "team-col unplaced" }, /* @__PURE__ */ React.createElement("h3", { className: "display" }, s.settings.teamPick === "host" ? "Tap a name to place" : "Still choosing"), /* @__PURE__ */ React.createElement("ul", null, unplaced.map((p) => /* @__PURE__ */ React.createElement("li", { key: p, className: "player-chip" }, /* @__PURE__ */ React.createElement("span", { className: "player-name" }, nameOf(s, p)), s.settings.teamPick === "host" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { type: "button", className: "mini a", onClick: () => commit((d) => {
         d.assign[p] = "A";
-      }, { noUndo: true }) }, "Latke"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "mini b", onClick: () => commit((d) => {
+      }, { noUndo: true }) }, teamName(s, "A")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "mini b", onClick: () => commit((d) => {
         d.assign[p] = "B";
-      }, { noUndo: true }) }, "Sufganiyah"))))), s.settings.teamPick === "host" && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip mt-2", onClick: () => commit((d) => balanceTeams(d), { noUndo: true }) }, "Split them evenly"))) : /* @__PURE__ */ React.createElement("ul", { className: "solo-list" }, ids.map((p) => /* @__PURE__ */ React.createElement(PlayerChip, { key: p, pid: p }))), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3 items-center mt-auto pt-4" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: startGame, disabled: ids.length < 2 }, "Start the game"), ids.length < 2 && /* @__PURE__ */ React.createElement("span", { className: "muted" }, "Waiting for at least 2 players"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip ml-auto", onClick: onExit }, "Leave")))));
+      }, { noUndo: true }) }, teamName(s, "B")))))), s.settings.teamPick === "host" && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip mt-2", onClick: () => commit((d) => balanceTeams(d), { noUndo: true }) }, "Split them evenly"))) : /* @__PURE__ */ React.createElement("ul", { className: "solo-list" }, ids.map((p) => /* @__PURE__ */ React.createElement(PlayerChip, { key: p, pid: p }))), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3 items-center mt-auto pt-4" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: startGame, disabled: ids.length < 2 }, "Start the game"), ids.length < 2 && /* @__PURE__ */ React.createElement("span", { className: "muted" }, "Waiting for at least 2 players"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip ml-auto", onClick: onExit }, "Leave")))));
     }
     const st = standings(s);
     const ScoreBox = ({ side }) => /* @__PURE__ */ React.createElement("div", { className: "score-box " + (isTeams ? TEAMS[side].cls : "") + (s.control === side && (s.phase === "round" || s.phase === "steal") ? " in-control" : "") + (s.stealSide === side && s.phase === "steal" ? " stealing" : "") }, /* @__PURE__ */ React.createElement("div", { className: "score-name" }, sideName(s, side)), /* @__PURE__ */ React.createElement("div", { className: "score-num" }, s.scores[side] || 0), isTeams && /* @__PURE__ */ React.createElement("div", { className: "score-members" }, ids.filter((p) => teamOf(s, p) === side).map((p) => nameOf(s, p)).join(" \xB7 ")));
@@ -1425,7 +1484,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     } else if (s.phase === "faceoff") {
       const f = s.face;
       const Slot = ({ slot }) => {
-        var _a2, _b2, _c2, _d2, _e2, _f2, _g2;
+        var _a2, _b2, _c2, _d2, _e2, _f2;
         const pid = f[slot];
         const won = ((_a2 = s.buzz) == null ? void 0 : _a2.winner) === pid;
         const lost = ((_b2 = s.buzz) == null ? void 0 : _b2.winner) && !won;
@@ -1440,7 +1499,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
             title: f.stage === "ready" ? "Tap to swap in someone else" : void 0
           },
           /* @__PURE__ */ React.createElement("span", { className: "face-name" }, pid ? nameOf(s, pid) : "\u2014"),
-          isTeams && pid && /* @__PURE__ */ React.createElement("span", { className: "face-team" }, (_g2 = TEAMS[teamOf(s, pid)]) == null ? void 0 : _g2.name),
+          isTeams && pid && /* @__PURE__ */ React.createElement("span", { className: "face-team" }, teamName(s, teamOf(s, pid))),
           f.stage === "ready" && /* @__PURE__ */ React.createElement("span", { className: "face-hint" }, "tap to swap"),
           f.stage === "open" && /* @__PURE__ */ React.createElement("span", { className: "face-hint" }, pressed ? "pressed!" : "\u2026")
         );
@@ -1530,14 +1589,14 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     const mySide = isTeams ? myTeam : pid;
     const kicked = (_d = s.kicked) == null ? void 0 : _d[pid];
     if (kicked) return frame(/* @__PURE__ */ React.createElement("div", { className: "phone-card" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, "You're out of this game"), /* @__PURE__ */ React.createElement("p", null, "The host removed you. Tap below to join again."), /* @__PURE__ */ React.createElement(Btn, { onClick: () => send({ left: false }) }, "Rejoin")));
-    const teamBadge = myTeam && /* @__PURE__ */ React.createElement("div", { className: "team-badge " + TEAMS[myTeam].cls }, TEAMS[myTeam].name);
+    const teamBadge = myTeam && /* @__PURE__ */ React.createElement("div", { className: "team-badge " + TEAMS[myTeam].cls }, teamName(s, myTeam));
     if (s.phase === "lobby") {
       const choose = isTeams && s.settings.teamPick === "phones";
       return frame(
         /* @__PURE__ */ React.createElement("div", { className: "phone-card" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-4xl" }, "You're in, ", name, "!"), !s.roster[pid] && /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Saying hello to the big screen\u2026"), choose ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "Pick your team:"), /* @__PURE__ */ React.createElement("div", { className: "grid gap-3" }, ["A", "B"].map((t) => /* @__PURE__ */ React.createElement("button", { key: t, type: "button", className: "team-pick " + TEAMS[t].cls + (rec.team === t ? " on" : ""), onClick: () => {
           Sound.ensure();
           send({ team: t });
-        } }, TEAMS[t].name, rec.team === t ? " \u2713" : "")))) : isTeams ? myTeam ? teamBadge : /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "The host is putting teams together.") : /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "Everyone plays for themselves this time."), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Watch the big screen. The game starts soon."))
+        } }, teamName(s, t), rec.team === t ? " \u2713" : "")))) : isTeams ? myTeam ? teamBadge : /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "The host is putting teams together.") : /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "Everyone plays for themselves this time."), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Watch the big screen. The game starts soon."))
       );
     }
     if (s.phase === "survey") {

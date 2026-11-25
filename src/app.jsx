@@ -82,6 +82,7 @@ function newGame(code) {
     v: 1, code, rev: 0, createdAt: Date.now(), hostTs: Date.now(),
     phase: "lobby",
     settings: { rounds: 6, mode: "teams", teamPick: "host" },
+    teamNames: { A: TEAMS.A.name, B: TEAMS.B.name },
     roster: {}, assign: {}, kicked: {}, scores: {}, played: {}, usedQ: [],
     roundNo: 0, roundKey: null, question: "", source: "", fallbackQ: null,
     board: [], bank: 0, strikes: 0, control: null, controlPid: null, stealSide: null,
@@ -93,7 +94,12 @@ const activeIds = (s) => Object.keys(s.roster || {}).filter((p) => !s.kicked?.[p
 const teamOf = (s, pid) => s.assign?.[pid] || s.roster?.[pid]?.team || null;
 const nameOf = (s, pid) => s.roster?.[pid]?.name || "Someone";
 const sideOf = (s, pid) => (s.settings.mode === "teams" ? teamOf(s, pid) || "A" : pid);
-const sideName = (s, side) => (s.settings.mode === "teams" ? TEAMS[side]?.name || "A team" : nameOf(s, side));
+const teamName = (s, t) => clean(s?.teamNames?.[t], 24) || TEAMS[t]?.name || "A team";
+const sideName = (s, side) => (s.settings.mode === "teams" ? teamName(s, side) : nameOf(s, side));
+const NAME_IDEAS = [
+  "Team Latke", "Team Sufganiyah", "The Dreidel Spinners", "Gelt Getters", "Oil Be There", "The Maccabees",
+  "Applesauce Army", "Sour Cream Squad", "Shamash Squad", "Eight Crazy Nights", "The Crispy Edges", "Nes Gadol",
+];
 function otherSide(s, side) {
   if (s.settings.mode === "teams") return side === "A" ? "B" : "A";
   const f = s.face || {};
@@ -1005,7 +1011,18 @@ function Host({ db, room, code, initial, onExit }) {
               <div className="team-cols">
                 {["A", "B"].map((t) => (
                   <div key={t} className={"team-col " + TEAMS[t].cls}>
-                    <h3 className="display">{TEAMS[t].name}</h3>
+                    <div className="team-name-row">
+                      <input id={"team-name-" + t} className="team-name-input display" value={s.teamNames?.[t] ?? TEAMS[t].name} maxLength={24}
+                        aria-label={`Name for team ${t === "A" ? "one" : "two"}`}
+                        onChange={(e) => { const v = e.target.value.slice(0, 24); commit((d) => { d.teamNames = { ...(d.teamNames || {}), [t]: v }; }, { noUndo: true }); }}
+                        onBlur={() => { if (!clean(s.teamNames?.[t], 24)) commit((d) => { d.teamNames = { ...(d.teamNames || {}), [t]: TEAMS[t].name }; }, { noUndo: true }); }} />
+                      <button type="button" className="dice" title="Suggest a team name" aria-label="Suggest a team name"
+                        onClick={() => commit((d) => {
+                          const taken = [teamName(d, "A"), teamName(d, "B")];
+                          const pool = NAME_IDEAS.filter((n) => !taken.includes(n));
+                          d.teamNames = { ...(d.teamNames || {}), [t]: pool[Math.floor(Math.random() * pool.length)] };
+                        }, { noUndo: true })}>🎲</button>
+                    </div>
                     <ul>{byTeam(t).map((p) => <PlayerChip key={p} pid={p} />)}</ul>
                     {!byTeam(t).length && <p className="muted text-sm">Nobody yet</p>}
                   </div>
@@ -1018,8 +1035,8 @@ function Host({ db, room, code, initial, onExit }) {
                         <li key={p} className="player-chip">
                           <span className="player-name">{nameOf(s, p)}</span>
                           {s.settings.teamPick === "host" && <>
-                            <button type="button" className="mini a" onClick={() => commit((d) => { d.assign[p] = "A"; }, { noUndo: true })}>Latke</button>
-                            <button type="button" className="mini b" onClick={() => commit((d) => { d.assign[p] = "B"; }, { noUndo: true })}>Sufganiyah</button>
+                            <button type="button" className="mini a" onClick={() => commit((d) => { d.assign[p] = "A"; }, { noUndo: true })}>{teamName(s, "A")}</button>
+                            <button type="button" className="mini b" onClick={() => commit((d) => { d.assign[p] = "B"; }, { noUndo: true })}>{teamName(s, "B")}</button>
                           </>}
                         </li>
                       ))}
@@ -1117,7 +1134,7 @@ function Host({ db, room, code, initial, onExit }) {
         <button type="button" className={"face-slot" + (won ? " won" : "") + (lost ? " lost" : "") + (f.answering === pid ? " answering" : "") + (isTeams && pid ? " " + TEAMS[teamOf(s, pid)]?.cls : "")}
           onClick={() => f.stage === "ready" && swapSlot(slot)} disabled={f.stage !== "ready"} title={f.stage === "ready" ? "Tap to swap in someone else" : undefined}>
           <span className="face-name">{pid ? nameOf(s, pid) : "—"}</span>
-          {isTeams && pid && <span className="face-team">{TEAMS[teamOf(s, pid)]?.name}</span>}
+          {isTeams && pid && <span className="face-team">{teamName(s, teamOf(s, pid))}</span>}
           {f.stage === "ready" && <span className="face-hint">tap to swap</span>}
           {f.stage === "open" && <span className="face-hint">{pressed ? "pressed!" : "…"}</span>}
         </button>
@@ -1352,7 +1369,7 @@ function Phone({ db, room, code, name, onLeave }) {
   const kicked = s.kicked?.[pid];
   if (kicked) return frame(<div className="phone-card"><h2 className="display text-3xl">You're out of this game</h2><p>The host removed you. Tap below to join again.</p><Btn onClick={() => send({ left: false })}>Rejoin</Btn></div>);
 
-  const teamBadge = myTeam && <div className={"team-badge " + TEAMS[myTeam].cls}>{TEAMS[myTeam].name}</div>;
+  const teamBadge = myTeam && <div className={"team-badge " + TEAMS[myTeam].cls}>{teamName(s, myTeam)}</div>;
 
   if (s.phase === "lobby") {
     const choose = isTeams && s.settings.teamPick === "phones";
@@ -1366,7 +1383,7 @@ function Phone({ db, room, code, name, onLeave }) {
             <div className="grid gap-3">
               {["A", "B"].map((t) => (
                 <button key={t} type="button" className={"team-pick " + TEAMS[t].cls + (rec.team === t ? " on" : "")} onClick={() => { Sound.ensure(); send({ team: t }); }}>
-                  {TEAMS[t].name}{rec.team === t ? " ✓" : ""}
+                  {teamName(s, t)}{rec.team === t ? " ✓" : ""}
                 </button>
               ))}
             </div>
