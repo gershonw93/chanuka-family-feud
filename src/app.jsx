@@ -97,6 +97,13 @@ const nameOf = (s, pid) => s.roster?.[pid]?.name || "Someone";
 const sideOf = (s, pid) => (s.settings.mode === "teams" ? teamOf(s, pid) || "A" : pid);
 const teamName = (s, t) => clean(s?.teamNames?.[t], 24) || TEAMS[t]?.name || "A team";
 const sideName = (s, side) => (s.settings.mode === "teams" ? teamName(s, side) : nameOf(s, side));
+function LastResult({ s }) {
+  const L = s.last;
+  if (!L) return null;
+  if (!L.side) return <>Nobody got that one!</>;
+  if (L.how === "correct") return <><span className="gold">{sideName(s, L.side)}</span> got it! <span className="gold">+{L.pts}</span></>;
+  return <><span className="gold">{sideName(s, L.side)}</span> {L.how === "steal" ? "stole" : "banked"} <span className="gold">{L.pts}</span> points!</>;
+}
 const NAME_IDEAS = [
   "Team Latke", "Team Sufganiyah", "The Dreidel Spinners", "Gelt Getters", "Oil Be There", "The Maccabees",
   "Applesauce Army", "Sour Cream Squad", "Shamash Squad", "Eight Crazy Nights", "The Crispy Edges", "Nes Gadol",
@@ -155,6 +162,11 @@ function setupFaceoff(s) {
   s.face = { p1, p2, stage: "ready", first: null, answering: null };
   s.buzz = { id: rid(), open: false, winner: null, times: null };
   s.phase = "faceoff";
+  if (s.settings.autoOpen && p1 && p2) {
+    s.buzz.open = true;
+    s.buzz.openedAt = Date.now();
+    s.face.stage = "open";
+  }
 }
 
 function pickQuestion(s) {
@@ -174,7 +186,8 @@ function beginRound(s, kind, opts = {}) {
   s.roundKey = rid();
   Object.assign(s, { bank: 0, strikes: 0, control: null, controlPid: null, stealSide: null, last: null, sharp: [], note: "" });
   let board = null;
-  if (kind === "custom") {
+  s.openQ = false;
+  if (kind === "custom" || kind === "open") {
     s.question = clean(opts.text, 120);
     s.fallbackQ = null;
   } else if (kind === "mine") {
@@ -182,7 +195,7 @@ function beginRound(s, kind, opts = {}) {
     s.question = clean(it.q, 120);
     s.fallbackQ = null;
     s.usedMine = [...(s.usedMine || []).filter((x) => x !== it.id), it.id];
-    if (opts.mode !== "survey" && Array.isArray(it.a) && it.a.length) {
+    if (opts.mode !== "survey" && opts.mode !== "open" && Array.isArray(it.a) && it.a.length) {
       board = it.a.map(([t, p]) => ({ t: clean(t, 32), p: Math.max(0, Number(p) || 0), r: false }));
     }
   } else {
@@ -191,11 +204,17 @@ function beginRound(s, kind, opts = {}) {
     else idx = pickQuestion(s);
     s.question = QUESTIONS[idx].q;
     s.fallbackQ = idx;
-    if (kind === "builtin") board = QUESTIONS[idx].a.map(([t, p]) => ({ t, p, r: false }));
+    if (kind === "builtin" && !opts.open) board = QUESTIONS[idx].a.map(([t, p]) => ({ t, p, r: false }));
   }
   s.source = kind;
   if (board) {
     s.board = board;
+    setupFaceoff(s);
+  } else if (kind === "open" || opts.open || (kind === "mine" && opts.mode !== "survey")) {
+    // Just ask it: straight to the buzzers, host judges the spoken answer.
+    s.board = [];
+    s.openQ = true;
+    s.survey = null;
     setupFaceoff(s);
   } else {
     const total = (s.settings.surveySec || 30) * 1000;
@@ -219,8 +238,8 @@ function giveControl(s, pid) {
 function allRevealed(s) { return s.board.length > 0 && s.board.every((c) => c.r); }
 
 function endRound(s, side, how, players) {
-  s.scores[side] = (s.scores[side] || 0) + s.bank;
-  s.last = { side, pts: s.bank, how };
+  if (side) s.scores[side] = (s.scores[side] || 0) + s.bank;
+  s.last = { side: side || null, pts: side ? s.bank : 0, how };
   s.board.forEach((c) => { if (!c.r) { c.r = true; c.late = true; } });
   s.phase = "roundEnd";
   s.buzz = s.buzz ? { ...s.buzz, open: false } : null;
@@ -851,6 +870,32 @@ function Host({ db, room, code, initial, onExit }) {
     }
   });
 
+  // Board-free rounds: the host judges the spoken answer.
+  const judge = (correct) => commit((d) => {
+    const f = d.face;
+    if (!f || !f.answering) return;
+    const pid = f.answering;
+    if (correct) {
+      d.bank = d.settings.openPts || 10;
+      endRound(d, sideOf(d, pid), "correct", playersRef.current);
+      return;
+    }
+    d.fx = fx("strike", { n: 1 });
+    if (f.stage === "answer1") {
+      f.first = { pid, idx: -1, pts: 0 };
+      f.answering = pid === f.p1 ? f.p2 : f.p1;
+      f.stage = "answer2";
+      d.note = `${nameOf(d, f.answering)}, your turn!`;
+    } else {
+      f.stage = "ready";
+      f.first = null;
+      f.answering = null;
+      d.buzz = { id: rid(), open: false, winner: null, times: null };
+      d.note = "Both missed. Buzz again, or move on.";
+    }
+  });
+  const nobodyGotIt = () => commit((d) => { d.bank = 0; endRound(d, null, "none", playersRef.current); d.fx = fx("strike", { n: 1 }); });
+
   const roundReveal = (idx) => commit((d) => {
     if (!d.board[idx] || d.board[idx].r) return;
     d.board[idx].r = true;
@@ -922,10 +967,10 @@ function Host({ db, room, code, initial, onExit }) {
 
   const nextMine = library.find((it) => !(s.usedMine || []).includes(it.id));
   const nextRound = (kind) => {
-    if (kind === "custom" && !clean(custom, 120)) return;
+    if ((kind === "custom" || kind === "open") && !clean(custom, 120)) return;
     if (kind === "mine" && !nextMine) return;
     commit((d) => beginRound(d, kind, { text: custom, item: nextMine }));
-    if (kind === "custom") setCustom("");
+    if (kind === "custom" || kind === "open") setCustom("");
   };
 
   /* ---- host overrides ---- */
@@ -965,10 +1010,12 @@ function Host({ db, room, code, initial, onExit }) {
     playQuestion: (choice, mode) => commit((d) => {
       const replace = d.phase === "faceoff" || d.phase === "round" || d.phase === "steal" || d.phase === "survey";
       if (choice.kind === "mine") beginRound(d, "mine", { item: choice.item, mode, replace });
-      else beginRound(d, mode === "survey" ? "survey" : "builtin", { idx: choice.idx, replace });
+      else beginRound(d, mode === "survey" ? "survey" : "builtin", { idx: choice.idx, replace, open: mode === "open" });
     }),
     setRounds: (n) => commit((d) => { d.settings.rounds = Math.max(Math.max(1, d.roundNo), Math.min(30, n)); }, { noUndo: true }),
     setSurveySec: (n) => commit((d) => { d.settings.surveySec = n; }, { noUndo: true }),
+    setOpenPts: (n) => commit((d) => { d.settings.openPts = n; }, { noUndo: true }),
+    setAutoOpen: (v) => commit((d) => { d.settings.autoOpen = v; }, { noUndo: true }),
     movePlayer: (pid) => commit((d) => { d.assign[pid] = teamOf(d, pid) === "A" ? "B" : "A"; }),
     kick: (pid) => commit((d) => { d.kicked[pid] = playersRef.current[pid]?.v || Date.now(); }),
   };
@@ -1162,7 +1209,7 @@ function Host({ db, room, code, initial, onExit }) {
     const last = s.roundNo >= s.settings.rounds;
     status = s.phase === "roundEnd" && s.last ? (
       <div className="status-big">
-        <span className="gold">{sideName(s, s.last.side)}</span> {s.last.how === "steal" ? "stole" : "banked"} <span className="gold">{s.last.pts}</span> points!
+        <LastResult s={s} />
         {s.sharp?.length > 0 && <div className="sharp">Sharp guessers on the phones: {s.sharp.join(", ")}</div>}
       </div>
     ) : <div className="status-big">Get ready for round {s.roundNo + 1}!</div>;
@@ -1171,13 +1218,13 @@ function Host({ db, room, code, initial, onExit }) {
     ) : (
       <div className="pick-row">
         <span className="pick-label">Round {s.roundNo + 1}:</span>
-        <Btn big onClick={() => nextRound("builtin")}>Ready-made board</Btn>
-        <Btn kind="blue" big onClick={() => nextRound("survey")}>Family survey</Btn>
-        {library.length > 0 && <Btn kind="ghost" big onClick={() => nextRound("mine")} disabled={!nextMine}>My question{nextMine ? ` (${library.filter((it) => !(s.usedMine || []).includes(it.id)).length} left)` : "s all played"}</Btn>}
-        <form className="custom-q" onSubmit={(e) => { e.preventDefault(); nextRound("custom"); }}>
-          <input id="custom-q" className="input" value={custom} maxLength={120} onChange={(e) => setCustom(e.target.value)} placeholder="Or type your own question…" />
-          <button type="submit" className="btn btn-ghost" disabled={!clean(custom)}>Ask the family</button>
+        <form className="custom-q" onSubmit={(e) => { e.preventDefault(); nextRound("open"); }}>
+          <input id="custom-q" className="input" value={custom} maxLength={120} onChange={(e) => setCustom(e.target.value)} placeholder="Type a question to ask…" />
+          <button type="submit" className="btn btn-gold" disabled={!clean(custom)}>Ask it</button>
         </form>
+        {library.length > 0 && <Btn big onClick={() => nextRound("mine")} disabled={!nextMine}>My next question{nextMine ? ` (${library.filter((it) => !(s.usedMine || []).includes(it.id)).length} left)` : "s all played"}</Btn>}
+        <Btn kind="blue" onClick={() => nextRound("builtin")}>Ready-made board</Btn>
+        <Btn kind="ghost" onClick={() => nextRound("survey")}>Family survey</Btn>
       </div>
     );
   } else if (s.phase === "survey") {
@@ -1242,6 +1289,7 @@ function Host({ db, room, code, initial, onExit }) {
         <div className="flex gap-3 flex-wrap items-center">
           <Btn big onClick={openBuzzers} disabled={!f.p1 || !f.p2}>Open buzzers</Btn>
           {s.note && <span className="note">{s.note}</span>}
+          {s.openQ && s.note && <Btn kind="ghost" onClick={nobodyGotIt}>Nobody got it, move on</Btn>}
         </div>
       );
     } else if (f.stage === "open") {
@@ -1252,6 +1300,14 @@ function Host({ db, room, code, initial, onExit }) {
           <span className="muted text-sm">Phone trouble? Tap who was first:</span>
           <button type="button" className="chip" onClick={() => declareBuzz(f.p1)}>{nameOf(s, f.p1)}</button>
           <button type="button" className="chip" onClick={() => declareBuzz(f.p2)}>{nameOf(s, f.p2)}</button>
+        </div>
+      );
+    } else if (s.openQ) {
+      controls = (
+        <div className="flex gap-3 flex-wrap items-center">
+          <span className="note"><b className="gold">{nameOf(s, f.answering)}</b>, say your answer!</span>
+          <Btn big onClick={() => judge(true)}>Correct (+{s.settings.openPts || 10})</Btn>
+          <Btn kind="red" big onClick={() => judge(false)}>Wrong</Btn>
         </div>
       );
     } else {
@@ -1325,8 +1381,9 @@ function Host({ db, room, code, initial, onExit }) {
       <StrikeOverlay n={xs?.n} k={xs?.k} />
       <main className={"game " + (isTeams ? "teams" : "solo")}>
         {isTeams && <ScoreBox side="A" />}
-        <section className="stage">
+        <section className={"stage" + (s.openQ && s.phase === "faceoff" ? " open" : "")}>
           {s.question && s.phase !== "pick" && <h1 className="question">{s.question}</h1>}
+          {s.openQ && s.phase === "faceoff" && <div className="worth">Buzz in and say your answer · worth {s.settings.openPts || 10} points</div>}
           {showBoard ? (
             <div className="board-wrap">
               <Board board={s.board} onTap={onTapCard} canTap={canTapBoard} host peek={peek} />
@@ -1404,7 +1461,7 @@ function HostTools({ s, act, live, library, saveLibrary, libErr, onClose }) {
   const sideList = sides(s);
   const inPlay = s.phase === "faceoff" || s.phase === "round" || s.phase === "steal";
   const [qPick, setQPick] = useState("");
-  const [qMode, setQMode] = useState("board");
+  const [qMode, setQMode] = useState("open");
   const [confirmSkip, setConfirmSkip] = useState(false);
   const [flash, setFlash] = useState("");
   const done = (m) => { setFlash(m); setTimeout(() => setFlash(""), 1800); };
@@ -1514,12 +1571,13 @@ function HostTools({ s, act, live, library, saveLibrary, libErr, onClose }) {
           </select>
           <div className="tool-row">
             <div className="seg">
-              <button type="button" className={qMode === "board" && !mineNoBoard ? "on" : ""} disabled={mineNoBoard} onClick={() => setQMode("board")}>With its answers</button>
-              <button type="button" className={qMode === "survey" || mineNoBoard ? "on" : ""} onClick={() => setQMode("survey")}>Family survey builds the board</button>
+              <button type="button" className={qMode === "open" || (qMode === "board" && mineNoBoard) ? "on" : ""} onClick={() => setQMode("open")}>Just buzz in</button>
+              <button type="button" className={qMode === "board" && !mineNoBoard ? "on" : ""} disabled={mineNoBoard} onClick={() => setQMode("board")}>With its answer board</button>
+              <button type="button" className={qMode === "survey" ? "on" : ""} onClick={() => setQMode("survey")}>Family survey</button>
             </div>
           </div>
           <div className="tool-row">
-            <Btn onClick={() => { act.playQuestion(choice, mineNoBoard ? "survey" : qMode); setQPick(""); onClose(); }} disabled={!canPlay}>
+            <Btn onClick={() => { act.playQuestion(choice, mineNoBoard && qMode === "board" ? "open" : qMode); setQPick(""); onClose(); }} disabled={!canPlay}>
               {live ? "Switch to it now" : "Play it now"}
             </Btn>
             {s.phase === "lobby" && <span className="muted text-sm">Start the game first.</span>}
@@ -1536,6 +1594,21 @@ function HostTools({ s, act, live, library, saveLibrary, libErr, onClose }) {
               <button type="button" onClick={() => act.setRounds(s.settings.rounds - 1)} aria-label="Fewer rounds">−</button>
               <b>{s.settings.rounds}</b>
               <button type="button" onClick={() => act.setRounds(s.settings.rounds + 1)} aria-label="More rounds">+</button>
+            </div>
+          </div>
+          <div className="tool-row">
+            <span className="tool-label">Points for a correct buzz-in answer</span>
+            <div className="seg">
+              {[5, 10, 20, 50, 100].map((n) => (
+                <button key={n} type="button" className={(s.settings.openPts || 10) === n ? "on" : ""} onClick={() => act.setOpenPts(n)}>{n}</button>
+              ))}
+            </div>
+          </div>
+          <div className="tool-row">
+            <span className="tool-label">Buzzers open</span>
+            <div className="seg">
+              <button type="button" className={!s.settings.autoOpen ? "on" : ""} onClick={() => act.setAutoOpen(false)}>When I tap Open buzzers</button>
+              <button type="button" className={s.settings.autoOpen ? "on" : ""} onClick={() => act.setAutoOpen(true)}>As soon as the question appears</button>
             </div>
           </div>
           <div className="tool-row">
@@ -1584,7 +1657,7 @@ function QuestionLibrary({ items, save, used, err }) {
     const q = clean(f.q, 120);
     if (!q) { setMsg("Type a question first."); return; }
     const rows = f.rows.map((r) => ({ t: clean(r.t, 32), p: String(r.p).trim() === "" ? null : Math.round(Number(r.p)) })).filter((r) => r.t);
-    if (rows.length === 1) { setMsg("Add at least 2 answers, or leave them all empty so the family survey builds the board."); return; }
+    if (rows.length === 1) { setMsg("Add at least 2 answers for a board, or leave them all empty to just buzz in."); return; }
     const auto = rows.some((r) => r.p === null || !Number.isFinite(r.p));
     const a = rows.map((r, i) => [r.t, auto ? AUTO_PTS[i] : Math.max(0, Math.min(999, r.p))]).sort((x, y) => y[1] - x[1]);
     const item = { id: f.id || "q" + rid(), q, a };
@@ -1620,7 +1693,7 @@ function QuestionLibrary({ items, save, used, err }) {
             </React.Fragment>
           ))}
         </div>
-        <p className="muted text-sm">Leave the points empty to score them in the order you typed. Leave every answer empty and the family survey builds the board when you play it.</p>
+        <p className="muted text-sm">Leave the points empty to score them in the order you typed. Answers are optional: without them, players just buzz in and you judge the answer.</p>
         <div className="tool-row">
           <Btn type="submit">{f.id ? "Save changes" : "Save question"}</Btn>
           {(f.id || f.q) && <button type="button" className="chip" onClick={() => { setF(blankForm()); setMsg(""); }}>{f.id ? "Cancel editing" : "Clear"}</button>}
@@ -1634,7 +1707,7 @@ function QuestionLibrary({ items, save, used, err }) {
             <li key={it.id}>
               <div className="qtext">
                 <b>{used.includes(it.id) ? "✓ " : ""}{it.q}</b>
-                <span className="muted text-sm">{it.a.length ? it.a.map((r) => `${r[0]} (${r[1]})`).join(" · ") : "Family survey builds the board"}</span>
+                <span className="muted text-sm">{it.a.length ? it.a.map((r) => `${r[0]} (${r[1]})`).join(" · ") : "Buzz in, you judge"}</span>
               </div>
               <div className="qbtns">
                 <button type="button" className="chip" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">↑</button>
@@ -1828,7 +1901,7 @@ function Phone({ db, room, code, name, onLeave }) {
     return frame(
       <div className="phone-card">
         {s.last ? (
-          <h2 className="display text-3xl"><span className="gold">{sideName(s, s.last.side)}</span> {s.last.how === "steal" ? "stole" : "banked"} {s.last.pts}!</h2>
+          <h2 className="display text-3xl"><LastResult s={s} /></h2>
         ) : <h2 className="display text-3xl">Get ready!</h2>}
         {s.sharp?.includes(name) && <p className="gold text-lg">Your guess was on the board. Nice!</p>}
         {teamBadge}
@@ -1881,6 +1954,16 @@ function SurveyCard({ s, rec, send, hostNow }) {
 }
 
 function WatchCard({ s, rec, send, title, sub, hot }) {
+  if (s.openQ) {
+    return (
+      <div className={"phone-card" + (hot ? " hot" : "")}>
+        <h2 className="display text-3xl">{title}</h2>
+        <p className="muted">{sub}</p>
+        <p className="phone-q big">{s.question}</p>
+        <p className="muted">Quiet in the audience! Let them answer.</p>
+      </div>
+    );
+  }
   const mine = rec.guess?.id === s.roundKey ? rec.guess.text : "";
   const [text, setText] = useState(mine);
   const submit = (e) => {

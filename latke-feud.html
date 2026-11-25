@@ -194,6 +194,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
 .hidden-board { flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; opacity: .35; }
 .ghost-card { border: 3px dashed rgba(255,255,255,.35); border-radius: 14px; display: grid; place-items: center; font-family: var(--display); font-size: 2rem; }
 .status { min-height: 0; }
+.stage.open { justify-content: center; gap: clamp(16px, 3vh, 36px); }
+.stage.open .question { font-size: clamp(2.2rem, 4.6vw, 5rem); }
+.stage.open .face-name { font-size: clamp(2rem, 4.2vw, 4.4rem); }
+.stage.open .face-slot { padding: 20px 18px; }
+.worth { align-self: center; text-align: center; font-weight: 700; font-size: clamp(1rem, 1.6vw, 1.5rem); color: var(--ink); background: var(--gold); border-radius: 999px; padding: .35em 1.1em; }
 .status-big { font-family: var(--display); font-size: clamp(1.6rem, 3vw, 3.2rem); text-align: center; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .3em .5em; }
 .status-mid { font-size: clamp(1.1rem, 2vw, 1.9rem); font-weight: 600; text-align: center; }
 .sharp { width: 100%; font-family: var(--body); font-size: clamp(1rem, 1.5vw, 1.4rem); color: var(--muted); font-weight: 500; }
@@ -705,6 +710,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     return clean((_a = s == null ? void 0 : s.teamNames) == null ? void 0 : _a[t], 24) || ((_b = TEAMS[t]) == null ? void 0 : _b.name) || "A team";
   };
   var sideName = (s, side) => s.settings.mode === "teams" ? teamName(s, side) : nameOf(s, side);
+  function LastResult({ s }) {
+    const L = s.last;
+    if (!L) return null;
+    if (!L.side) return /* @__PURE__ */ React.createElement(React.Fragment, null, "Nobody got that one!");
+    if (L.how === "correct") return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "gold" }, sideName(s, L.side)), " got it! ", /* @__PURE__ */ React.createElement("span", { className: "gold" }, "+", L.pts));
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "gold" }, sideName(s, L.side)), " ", L.how === "steal" ? "stole" : "banked", " ", /* @__PURE__ */ React.createElement("span", { className: "gold" }, L.pts), " points!");
+  }
   var NAME_IDEAS = [
     "Team Latke",
     "Team Sufganiyah",
@@ -778,6 +790,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     s.face = { p1, p2, stage: "ready", first: null, answering: null };
     s.buzz = { id: rid(), open: false, winner: null, times: null };
     s.phase = "faceoff";
+    if (s.settings.autoOpen && p1 && p2) {
+      s.buzz.open = true;
+      s.buzz.openedAt = Date.now();
+      s.face.stage = "open";
+    }
   }
   function pickQuestion(s) {
     let free = QUESTIONS.map((_, i) => i).filter((i) => !s.usedQ.includes(i));
@@ -796,7 +813,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     s.roundKey = rid();
     Object.assign(s, { bank: 0, strikes: 0, control: null, controlPid: null, stealSide: null, last: null, sharp: [], note: "" });
     let board = null;
-    if (kind === "custom") {
+    s.openQ = false;
+    if (kind === "custom" || kind === "open") {
       s.question = clean(opts.text, 120);
       s.fallbackQ = null;
     } else if (kind === "mine") {
@@ -804,7 +822,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       s.question = clean(it.q, 120);
       s.fallbackQ = null;
       s.usedMine = [...(s.usedMine || []).filter((x) => x !== it.id), it.id];
-      if (opts.mode !== "survey" && Array.isArray(it.a) && it.a.length) {
+      if (opts.mode !== "survey" && opts.mode !== "open" && Array.isArray(it.a) && it.a.length) {
         board = it.a.map(([t, p]) => ({ t: clean(t, 32), p: Math.max(0, Number(p) || 0), r: false }));
       }
     } else {
@@ -814,11 +832,16 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       } else idx = pickQuestion(s);
       s.question = QUESTIONS[idx].q;
       s.fallbackQ = idx;
-      if (kind === "builtin") board = QUESTIONS[idx].a.map(([t, p]) => ({ t, p, r: false }));
+      if (kind === "builtin" && !opts.open) board = QUESTIONS[idx].a.map(([t, p]) => ({ t, p, r: false }));
     }
     s.source = kind;
     if (board) {
       s.board = board;
+      setupFaceoff(s);
+    } else if (kind === "open" || opts.open || kind === "mine" && opts.mode !== "survey") {
+      s.board = [];
+      s.openQ = true;
+      s.survey = null;
       setupFaceoff(s);
     } else {
       const total = (s.settings.surveySec || 30) * 1e3;
@@ -841,8 +864,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     return s.board.length > 0 && s.board.every((c) => c.r);
   }
   function endRound(s, side, how, players) {
-    s.scores[side] = (s.scores[side] || 0) + s.bank;
-    s.last = { side, pts: s.bank, how };
+    if (side) s.scores[side] = (s.scores[side] || 0) + s.bank;
+    s.last = { side: side || null, pts: side ? s.bank : 0, how };
     s.board.forEach((c) => {
       if (!c.r) {
         c.r = true;
@@ -1445,6 +1468,34 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
         if (allRevealed(d)) endRound(d, d.control, "cleared", playersRef.current);
       }
     });
+    const judge = (correct) => commit((d) => {
+      const f = d.face;
+      if (!f || !f.answering) return;
+      const pid = f.answering;
+      if (correct) {
+        d.bank = d.settings.openPts || 10;
+        endRound(d, sideOf(d, pid), "correct", playersRef.current);
+        return;
+      }
+      d.fx = fx("strike", { n: 1 });
+      if (f.stage === "answer1") {
+        f.first = { pid, idx: -1, pts: 0 };
+        f.answering = pid === f.p1 ? f.p2 : f.p1;
+        f.stage = "answer2";
+        d.note = `${nameOf(d, f.answering)}, your turn!`;
+      } else {
+        f.stage = "ready";
+        f.first = null;
+        f.answering = null;
+        d.buzz = { id: rid(), open: false, winner: null, times: null };
+        d.note = "Both missed. Buzz again, or move on.";
+      }
+    });
+    const nobodyGotIt = () => commit((d) => {
+      d.bank = 0;
+      endRound(d, null, "none", playersRef.current);
+      d.fx = fx("strike", { n: 1 });
+    });
     const roundReveal = (idx) => commit((d) => {
       if (!d.board[idx] || d.board[idx].r) return;
       d.board[idx].r = true;
@@ -1512,10 +1563,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     });
     const nextMine = library.find((it) => !(s.usedMine || []).includes(it.id));
     const nextRound = (kind) => {
-      if (kind === "custom" && !clean(custom, 120)) return;
+      if ((kind === "custom" || kind === "open") && !clean(custom, 120)) return;
       if (kind === "mine" && !nextMine) return;
       commit((d) => beginRound(d, kind, { text: custom, item: nextMine }));
-      if (kind === "custom") setCustom("");
+      if (kind === "custom" || kind === "open") setCustom("");
     };
     const live = s.phase === "faceoff" || s.phase === "round" || s.phase === "steal" || s.phase === "survey";
     const act = {
@@ -1567,13 +1618,19 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       playQuestion: (choice, mode) => commit((d) => {
         const replace = d.phase === "faceoff" || d.phase === "round" || d.phase === "steal" || d.phase === "survey";
         if (choice.kind === "mine") beginRound(d, "mine", { item: choice.item, mode, replace });
-        else beginRound(d, mode === "survey" ? "survey" : "builtin", { idx: choice.idx, replace });
+        else beginRound(d, mode === "survey" ? "survey" : "builtin", { idx: choice.idx, replace, open: mode === "open" });
       }),
       setRounds: (n) => commit((d) => {
         d.settings.rounds = Math.max(Math.max(1, d.roundNo), Math.min(30, n));
       }, { noUndo: true }),
       setSurveySec: (n) => commit((d) => {
         d.settings.surveySec = n;
+      }, { noUndo: true }),
+      setOpenPts: (n) => commit((d) => {
+        d.settings.openPts = n;
+      }, { noUndo: true }),
+      setAutoOpen: (v) => commit((d) => {
+        d.settings.autoOpen = v;
       }, { noUndo: true }),
       movePlayer: (pid) => commit((d) => {
         d.assign[pid] = teamOf(d, pid) === "A" ? "B" : "A";
@@ -1706,11 +1763,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     let status = null;
     if (s.phase === "pick" || s.phase === "roundEnd") {
       const last = s.roundNo >= s.settings.rounds;
-      status = s.phase === "roundEnd" && s.last ? /* @__PURE__ */ React.createElement("div", { className: "status-big" }, /* @__PURE__ */ React.createElement("span", { className: "gold" }, sideName(s, s.last.side)), " ", s.last.how === "steal" ? "stole" : "banked", " ", /* @__PURE__ */ React.createElement("span", { className: "gold" }, s.last.pts), " points!", ((_d = s.sharp) == null ? void 0 : _d.length) > 0 && /* @__PURE__ */ React.createElement("div", { className: "sharp" }, "Sharp guessers on the phones: ", s.sharp.join(", "))) : /* @__PURE__ */ React.createElement("div", { className: "status-big" }, "Get ready for round ", s.roundNo + 1, "!");
-      controls = last && s.phase === "roundEnd" ? /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: finishGame }, "Crown the winner") : /* @__PURE__ */ React.createElement("div", { className: "pick-row" }, /* @__PURE__ */ React.createElement("span", { className: "pick-label" }, "Round ", s.roundNo + 1, ":"), /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: () => nextRound("builtin") }, "Ready-made board"), /* @__PURE__ */ React.createElement(Btn, { kind: "blue", big: true, onClick: () => nextRound("survey") }, "Family survey"), library.length > 0 && /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", big: true, onClick: () => nextRound("mine"), disabled: !nextMine }, "My question", nextMine ? ` (${library.filter((it) => !(s.usedMine || []).includes(it.id)).length} left)` : "s all played"), /* @__PURE__ */ React.createElement("form", { className: "custom-q", onSubmit: (e) => {
+      status = s.phase === "roundEnd" && s.last ? /* @__PURE__ */ React.createElement("div", { className: "status-big" }, /* @__PURE__ */ React.createElement(LastResult, { s }), ((_d = s.sharp) == null ? void 0 : _d.length) > 0 && /* @__PURE__ */ React.createElement("div", { className: "sharp" }, "Sharp guessers on the phones: ", s.sharp.join(", "))) : /* @__PURE__ */ React.createElement("div", { className: "status-big" }, "Get ready for round ", s.roundNo + 1, "!");
+      controls = last && s.phase === "roundEnd" ? /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: finishGame }, "Crown the winner") : /* @__PURE__ */ React.createElement("div", { className: "pick-row" }, /* @__PURE__ */ React.createElement("span", { className: "pick-label" }, "Round ", s.roundNo + 1, ":"), /* @__PURE__ */ React.createElement("form", { className: "custom-q", onSubmit: (e) => {
         e.preventDefault();
-        nextRound("custom");
-      } }, /* @__PURE__ */ React.createElement("input", { id: "custom-q", className: "input", value: custom, maxLength: 120, onChange: (e) => setCustom(e.target.value), placeholder: "Or type your own question\u2026" }), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-ghost", disabled: !clean(custom) }, "Ask the family")));
+        nextRound("open");
+      } }, /* @__PURE__ */ React.createElement("input", { id: "custom-q", className: "input", value: custom, maxLength: 120, onChange: (e) => setCustom(e.target.value), placeholder: "Type a question to ask\u2026" }), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-gold", disabled: !clean(custom) }, "Ask it")), library.length > 0 && /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: () => nextRound("mine"), disabled: !nextMine }, "My next question", nextMine ? ` (${library.filter((it) => !(s.usedMine || []).includes(it.id)).length} left)` : "s all played"), /* @__PURE__ */ React.createElement(Btn, { kind: "blue", onClick: () => nextRound("builtin") }, "Ready-made board"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: () => nextRound("survey") }, "Family survey"));
     } else if (s.phase === "survey") {
       const count = Object.values(players).filter((r) => {
         var _a2, _b2;
@@ -1744,9 +1801,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       const diff = ((_g = s.buzz) == null ? void 0 : _g.times) && Object.keys(s.buzz.times).length === 2 ? Math.abs(Object.values(s.buzz.times)[0] - Object.values(s.buzz.times)[1]) / 1e3 : null;
       status = /* @__PURE__ */ React.createElement("div", { className: "faceoff-row" }, /* @__PURE__ */ React.createElement(Slot, { slot: "p1" }), /* @__PURE__ */ React.createElement("div", { className: "vs" }, f.stage === "ready" && /* @__PURE__ */ React.createElement("span", null, "Face-off!"), f.stage === "open" && /* @__PURE__ */ React.createElement("span", { className: "pulse gold" }, "Buzzers open!"), (f.stage === "answer1" || f.stage === "answer2") && ((_h = s.buzz) == null ? void 0 : _h.winner) && /* @__PURE__ */ React.createElement("div", { className: "buzz-result" }, /* @__PURE__ */ React.createElement("div", { className: "buzz-first" }, /* @__PURE__ */ React.createElement("span", { className: "gold" }, nameOf(s, s.buzz.winner)), " buzzed first!"), /* @__PURE__ */ React.createElement("div", { className: "locked" }, "Buzzers locked", diff !== null && diff < 5 ? ` \xB7 by ${diff.toFixed(2)}s` : ""))), /* @__PURE__ */ React.createElement(Slot, { slot: "p2" }));
       if (f.stage === "ready") {
-        controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: openBuzzers, disabled: !f.p1 || !f.p2 }, "Open buzzers"), s.note && /* @__PURE__ */ React.createElement("span", { className: "note" }, s.note));
+        controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: openBuzzers, disabled: !f.p1 || !f.p2 }, "Open buzzers"), s.note && /* @__PURE__ */ React.createElement("span", { className: "note" }, s.note), s.openQ && s.note && /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: nobodyGotIt }, "Nobody got it, move on"));
       } else if (f.stage === "open") {
         controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, "Waiting for a buzz\u2026"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: resetBuzzers }, "Reset buzzers"), /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, "Phone trouble? Tap who was first:"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => declareBuzz(f.p1) }, nameOf(s, f.p1)), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => declareBuzz(f.p2) }, nameOf(s, f.p2)));
+      } else if (s.openQ) {
+        controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, /* @__PURE__ */ React.createElement("b", { className: "gold" }, nameOf(s, f.answering)), ", say your answer!"), /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: () => judge(true) }, "Correct (+", s.settings.openPts || 10, ")"), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: () => judge(false) }, "Wrong"));
       } else {
         controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, /* @__PURE__ */ React.createElement("b", { className: "gold" }, nameOf(s, f.answering)), ", say your answer! Tap the matching card."), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: () => faceAnswer(-1) }, "Not on the board"));
       }
@@ -1763,7 +1822,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       return /* @__PURE__ */ React.createElement("div", { className: "screen host final" }, header, /* @__PURE__ */ React.createElement(Confetti, null), /* @__PURE__ */ React.createElement("main", { className: "final-main" }, /* @__PURE__ */ React.createElement("p", { className: "eyebrow" }, "And the winner is\u2026"), /* @__PURE__ */ React.createElement("h1", { className: "display winner" }, winners.map((w) => w.name).join(" & ")), /* @__PURE__ */ React.createElement("p", { className: "status-mid" }, top, " points", winners.length > 1 ? " each. It's a tie!" : ""), /* @__PURE__ */ React.createElement("ol", { className: "final-list" }, st.map((x, i) => /* @__PURE__ */ React.createElement("li", { key: x.side, className: i === 0 || x.score === top ? "top" : "" }, /* @__PURE__ */ React.createElement("span", null, x.name), /* @__PURE__ */ React.createElement("b", null, x.score)))), /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap justify-center" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: playAgain }, "Play again"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: onExit }, "Close game"))));
     }
     const showBoard = s.board.length > 0 && (s.phase === "faceoff" || s.phase === "round" || s.phase === "steal" || s.phase === "roundEnd");
-    return /* @__PURE__ */ React.createElement("div", { className: "screen host" }, header, syncBanner, /* @__PURE__ */ React.createElement(StrikeOverlay, { n: xs == null ? void 0 : xs.n, k: xs == null ? void 0 : xs.k }), /* @__PURE__ */ React.createElement("main", { className: "game " + (isTeams ? "teams" : "solo") }, isTeams && /* @__PURE__ */ React.createElement(ScoreBox, { side: "A" }), /* @__PURE__ */ React.createElement("section", { className: "stage" }, s.question && s.phase !== "pick" && /* @__PURE__ */ React.createElement("h1", { className: "question" }, s.question), showBoard ? /* @__PURE__ */ React.createElement("div", { className: "board-wrap" }, /* @__PURE__ */ React.createElement(Board, { board: s.board, onTap: onTapCard, canTap: canTapBoard, host: true, peek }), /* @__PURE__ */ React.createElement("div", { className: "bank" }, /* @__PURE__ */ React.createElement("span", null, "Round bank"), /* @__PURE__ */ React.createElement("b", null, s.bank))) : s.phase === "pick" || s.phase === "roundEnd" ? /* @__PURE__ */ React.createElement(ScoreTable, { st }) : null, s.phase === "survey" && !((_k = s.survey) == null ? void 0 : _k.empty) && /* @__PURE__ */ React.createElement("div", { className: "hidden-board" }, Array.from({ length: 7 }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "ghost-card" }, "?"))), /* @__PURE__ */ React.createElement("div", { className: "status" }, status)), isTeams ? /* @__PURE__ */ React.createElement(ScoreBox, { side: "B" }) : /* @__PURE__ */ React.createElement("aside", { className: "solo-scores" }, /* @__PURE__ */ React.createElement("h3", { className: "display" }, "Scores"), /* @__PURE__ */ React.createElement("ol", null, st.map((x) => /* @__PURE__ */ React.createElement("li", { key: x.side, className: (s.control === x.side && (s.phase === "round" || s.phase === "steal") ? "in-control " : "") + (s.stealSide === x.side && s.phase === "steal" ? "stealing" : "") }, /* @__PURE__ */ React.createElement("span", null, x.name), /* @__PURE__ */ React.createElement("b", null, x.score)))))), s.phase === "roundEnd" && showBoard && /* @__PURE__ */ React.createElement("div", { className: "round-scores" }, /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true })), /* @__PURE__ */ React.createElement("footer", { className: "host-controls" }, controls));
+    return /* @__PURE__ */ React.createElement("div", { className: "screen host" }, header, syncBanner, /* @__PURE__ */ React.createElement(StrikeOverlay, { n: xs == null ? void 0 : xs.n, k: xs == null ? void 0 : xs.k }), /* @__PURE__ */ React.createElement("main", { className: "game " + (isTeams ? "teams" : "solo") }, isTeams && /* @__PURE__ */ React.createElement(ScoreBox, { side: "A" }), /* @__PURE__ */ React.createElement("section", { className: "stage" + (s.openQ && s.phase === "faceoff" ? " open" : "") }, s.question && s.phase !== "pick" && /* @__PURE__ */ React.createElement("h1", { className: "question" }, s.question), s.openQ && s.phase === "faceoff" && /* @__PURE__ */ React.createElement("div", { className: "worth" }, "Buzz in and say your answer \xB7 worth ", s.settings.openPts || 10, " points"), showBoard ? /* @__PURE__ */ React.createElement("div", { className: "board-wrap" }, /* @__PURE__ */ React.createElement(Board, { board: s.board, onTap: onTapCard, canTap: canTapBoard, host: true, peek }), /* @__PURE__ */ React.createElement("div", { className: "bank" }, /* @__PURE__ */ React.createElement("span", null, "Round bank"), /* @__PURE__ */ React.createElement("b", null, s.bank))) : s.phase === "pick" || s.phase === "roundEnd" ? /* @__PURE__ */ React.createElement(ScoreTable, { st }) : null, s.phase === "survey" && !((_k = s.survey) == null ? void 0 : _k.empty) && /* @__PURE__ */ React.createElement("div", { className: "hidden-board" }, Array.from({ length: 7 }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "ghost-card" }, "?"))), /* @__PURE__ */ React.createElement("div", { className: "status" }, status)), isTeams ? /* @__PURE__ */ React.createElement(ScoreBox, { side: "B" }) : /* @__PURE__ */ React.createElement("aside", { className: "solo-scores" }, /* @__PURE__ */ React.createElement("h3", { className: "display" }, "Scores"), /* @__PURE__ */ React.createElement("ol", null, st.map((x) => /* @__PURE__ */ React.createElement("li", { key: x.side, className: (s.control === x.side && (s.phase === "round" || s.phase === "steal") ? "in-control " : "") + (s.stealSide === x.side && s.phase === "steal" ? "stealing" : "") }, /* @__PURE__ */ React.createElement("span", null, x.name), /* @__PURE__ */ React.createElement("b", null, x.score)))))), s.phase === "roundEnd" && showBoard && /* @__PURE__ */ React.createElement("div", { className: "round-scores" }, /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true })), /* @__PURE__ */ React.createElement("footer", { className: "host-controls" }, controls));
   }
   function sanitizeItems(raw) {
     if (!Array.isArray(raw)) return [];
@@ -1803,7 +1862,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     const sideList = sides(s);
     const inPlay = s.phase === "faceoff" || s.phase === "round" || s.phase === "steal";
     const [qPick, setQPick] = useState("");
-    const [qMode, setQMode] = useState("board");
+    const [qMode, setQMode] = useState("open");
     const [confirmSkip, setConfirmSkip] = useState(false);
     const [flash, setFlash] = useState("");
     const done = (m) => {
@@ -1830,11 +1889,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       act.skipRound();
       setConfirmSkip(false);
       onClose();
-    } }, "Yes, skip it"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => setConfirmSkip(false) }, "No")) : /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => setConfirmSkip(true) }, "Skip this round (no points)")), /* @__PURE__ */ React.createElement("section", { className: "tool-sec" }, /* @__PURE__ */ React.createElement("h3", null, live ? "Switch to a different question" : "Choose the next question"), /* @__PURE__ */ React.createElement("select", { id: "tool-q", className: "select w-full", value: qPick, onChange: (e) => setQPick(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Pick a question\u2026"), library.length > 0 && /* @__PURE__ */ React.createElement("optgroup", { label: "My questions" }, library.map((it) => /* @__PURE__ */ React.createElement("option", { key: it.id, value: "m:" + it.id }, (s.usedMine || []).includes(it.id) ? "\u2713 " : "", it.q))), /* @__PURE__ */ React.createElement("optgroup", { label: "Built-in questions" }, QUESTIONS.map((q, i) => /* @__PURE__ */ React.createElement("option", { key: i, value: "b:" + i }, s.usedQ.includes(i) ? "\u2713 " : "", q.q)))), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: qMode === "board" && !mineNoBoard ? "on" : "", disabled: mineNoBoard, onClick: () => setQMode("board") }, "With its answers"), /* @__PURE__ */ React.createElement("button", { type: "button", className: qMode === "survey" || mineNoBoard ? "on" : "", onClick: () => setQMode("survey") }, "Family survey builds the board"))), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement(Btn, { onClick: () => {
-      act.playQuestion(choice, mineNoBoard ? "survey" : qMode);
+    } }, "Yes, skip it"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => setConfirmSkip(false) }, "No")) : /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => setConfirmSkip(true) }, "Skip this round (no points)")), /* @__PURE__ */ React.createElement("section", { className: "tool-sec" }, /* @__PURE__ */ React.createElement("h3", null, live ? "Switch to a different question" : "Choose the next question"), /* @__PURE__ */ React.createElement("select", { id: "tool-q", className: "select w-full", value: qPick, onChange: (e) => setQPick(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Pick a question\u2026"), library.length > 0 && /* @__PURE__ */ React.createElement("optgroup", { label: "My questions" }, library.map((it) => /* @__PURE__ */ React.createElement("option", { key: it.id, value: "m:" + it.id }, (s.usedMine || []).includes(it.id) ? "\u2713 " : "", it.q))), /* @__PURE__ */ React.createElement("optgroup", { label: "Built-in questions" }, QUESTIONS.map((q, i) => /* @__PURE__ */ React.createElement("option", { key: i, value: "b:" + i }, s.usedQ.includes(i) ? "\u2713 " : "", q.q)))), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: qMode === "open" || qMode === "board" && mineNoBoard ? "on" : "", onClick: () => setQMode("open") }, "Just buzz in"), /* @__PURE__ */ React.createElement("button", { type: "button", className: qMode === "board" && !mineNoBoard ? "on" : "", disabled: mineNoBoard, onClick: () => setQMode("board") }, "With its answer board"), /* @__PURE__ */ React.createElement("button", { type: "button", className: qMode === "survey" ? "on" : "", onClick: () => setQMode("survey") }, "Family survey"))), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement(Btn, { onClick: () => {
+      act.playQuestion(choice, mineNoBoard && qMode === "board" ? "open" : qMode);
       setQPick("");
       onClose();
-    }, disabled: !canPlay }, live ? "Switch to it now" : "Play it now"), s.phase === "lobby" && /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, "Start the game first."), live && /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, "Replaces the current round. Nobody scores for it.")), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "\u2713 means already played in this game.")), /* @__PURE__ */ React.createElement("section", { className: "tool-sec" }, /* @__PURE__ */ React.createElement("h3", null, "Game settings"), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement("span", { className: "tool-label" }, "Rounds"), /* @__PURE__ */ React.createElement("div", { className: "stepper" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => act.setRounds(s.settings.rounds - 1), "aria-label": "Fewer rounds" }, "\u2212"), /* @__PURE__ */ React.createElement("b", null, s.settings.rounds), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => act.setRounds(s.settings.rounds + 1), "aria-label": "More rounds" }, "+"))), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement("span", { className: "tool-label" }, "Survey time"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, [15, 30, 45, 60].map((n) => /* @__PURE__ */ React.createElement("button", { key: n, type: "button", className: (s.settings.surveySec || 30) === n ? "on" : "", onClick: () => act.setSurveySec(n) }, n, "s"))))), s.phase !== "lobby" && ids.length > 0 && /* @__PURE__ */ React.createElement("section", { className: "tool-sec" }, /* @__PURE__ */ React.createElement("h3", null, "Players"), /* @__PURE__ */ React.createElement("ul", { className: "tool-players" }, ids.map((p) => /* @__PURE__ */ React.createElement("li", { key: p }, /* @__PURE__ */ React.createElement("span", { className: "tool-name" }, nameOf(s, p)), isTeams && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => act.movePlayer(p) }, "Move to ", teamName(s, teamOf(s, p) === "A" ? "B" : "A")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => act.kick(p) }, "Remove"))))), /* @__PURE__ */ React.createElement("section", { className: "tool-sec" }, /* @__PURE__ */ React.createElement("h3", null, "My questions"), /* @__PURE__ */ React.createElement(QuestionLibrary, { items: library, save: saveLibrary, used: s.usedMine || [], err: libErr }))));
+    }, disabled: !canPlay }, live ? "Switch to it now" : "Play it now"), s.phase === "lobby" && /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, "Start the game first."), live && /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, "Replaces the current round. Nobody scores for it.")), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "\u2713 means already played in this game.")), /* @__PURE__ */ React.createElement("section", { className: "tool-sec" }, /* @__PURE__ */ React.createElement("h3", null, "Game settings"), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement("span", { className: "tool-label" }, "Rounds"), /* @__PURE__ */ React.createElement("div", { className: "stepper" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => act.setRounds(s.settings.rounds - 1), "aria-label": "Fewer rounds" }, "\u2212"), /* @__PURE__ */ React.createElement("b", null, s.settings.rounds), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => act.setRounds(s.settings.rounds + 1), "aria-label": "More rounds" }, "+"))), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement("span", { className: "tool-label" }, "Points for a correct buzz-in answer"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, [5, 10, 20, 50, 100].map((n) => /* @__PURE__ */ React.createElement("button", { key: n, type: "button", className: (s.settings.openPts || 10) === n ? "on" : "", onClick: () => act.setOpenPts(n) }, n)))), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement("span", { className: "tool-label" }, "Buzzers open"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: !s.settings.autoOpen ? "on" : "", onClick: () => act.setAutoOpen(false) }, "When I tap Open buzzers"), /* @__PURE__ */ React.createElement("button", { type: "button", className: s.settings.autoOpen ? "on" : "", onClick: () => act.setAutoOpen(true) }, "As soon as the question appears"))), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement("span", { className: "tool-label" }, "Survey time"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, [15, 30, 45, 60].map((n) => /* @__PURE__ */ React.createElement("button", { key: n, type: "button", className: (s.settings.surveySec || 30) === n ? "on" : "", onClick: () => act.setSurveySec(n) }, n, "s"))))), s.phase !== "lobby" && ids.length > 0 && /* @__PURE__ */ React.createElement("section", { className: "tool-sec" }, /* @__PURE__ */ React.createElement("h3", null, "Players"), /* @__PURE__ */ React.createElement("ul", { className: "tool-players" }, ids.map((p) => /* @__PURE__ */ React.createElement("li", { key: p }, /* @__PURE__ */ React.createElement("span", { className: "tool-name" }, nameOf(s, p)), isTeams && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => act.movePlayer(p) }, "Move to ", teamName(s, teamOf(s, p) === "A" ? "B" : "A")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => act.kick(p) }, "Remove"))))), /* @__PURE__ */ React.createElement("section", { className: "tool-sec" }, /* @__PURE__ */ React.createElement("h3", null, "My questions"), /* @__PURE__ */ React.createElement(QuestionLibrary, { items: library, save: saveLibrary, used: s.usedMine || [], err: libErr }))));
   }
   var blankForm = () => ({ id: null, q: "", rows: Array.from({ length: 7 }, () => ({ t: "", p: "" })) });
   function QuestionLibrary({ items, save, used, err: err2 }) {
@@ -1851,7 +1910,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       }
       const rows = f.rows.map((r) => ({ t: clean(r.t, 32), p: String(r.p).trim() === "" ? null : Math.round(Number(r.p)) })).filter((r) => r.t);
       if (rows.length === 1) {
-        setMsg("Add at least 2 answers, or leave them all empty so the family survey builds the board.");
+        setMsg("Add at least 2 answers for a board, or leave them all empty to just buzz in.");
         return;
       }
       const auto = rows.some((r) => r.p === null || !Number.isFinite(r.p));
@@ -1873,10 +1932,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       [next[i], next[j]] = [next[j], next[i]];
       save(next);
     };
-    return /* @__PURE__ */ React.createElement("div", { className: "qlib" }, /* @__PURE__ */ React.createElement("form", { className: "qform", onSubmit: submit }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Question"), /* @__PURE__ */ React.createElement("input", { id: "myq-text", className: "input", value: f.q, maxLength: 120, onChange: (e) => setF({ ...f, q: e.target.value }), placeholder: "Name something Uncle Shlomo always brings to the party" })), /* @__PURE__ */ React.createElement("div", { className: "qrows" }, /* @__PURE__ */ React.createElement("span", { className: "qhead" }, "Answers, top answer first"), /* @__PURE__ */ React.createElement("span", { className: "qhead" }, "Points"), f.rows.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("input", { id: "myq-a" + i, className: "input", value: r.t, maxLength: 32, onChange: (e) => setRow(i, "t", e.target.value), placeholder: `Answer ${i + 1}`, "aria-label": `Answer ${i + 1}` }), /* @__PURE__ */ React.createElement("input", { id: "myq-p" + i, className: "input", value: r.p, inputMode: "numeric", maxLength: 3, onChange: (e) => setRow(i, "p", e.target.value.replace(/[^0-9]/g, "")), placeholder: String(AUTO_PTS[i]), "aria-label": `Points for answer ${i + 1}` })))), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "Leave the points empty to score them in the order you typed. Leave every answer empty and the family survey builds the board when you play it."), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement(Btn, { type: "submit" }, f.id ? "Save changes" : "Save question"), (f.id || f.q) && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => {
+    return /* @__PURE__ */ React.createElement("div", { className: "qlib" }, /* @__PURE__ */ React.createElement("form", { className: "qform", onSubmit: submit }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Question"), /* @__PURE__ */ React.createElement("input", { id: "myq-text", className: "input", value: f.q, maxLength: 120, onChange: (e) => setF({ ...f, q: e.target.value }), placeholder: "Name something Uncle Shlomo always brings to the party" })), /* @__PURE__ */ React.createElement("div", { className: "qrows" }, /* @__PURE__ */ React.createElement("span", { className: "qhead" }, "Answers, top answer first"), /* @__PURE__ */ React.createElement("span", { className: "qhead" }, "Points"), f.rows.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("input", { id: "myq-a" + i, className: "input", value: r.t, maxLength: 32, onChange: (e) => setRow(i, "t", e.target.value), placeholder: `Answer ${i + 1}`, "aria-label": `Answer ${i + 1}` }), /* @__PURE__ */ React.createElement("input", { id: "myq-p" + i, className: "input", value: r.p, inputMode: "numeric", maxLength: 3, onChange: (e) => setRow(i, "p", e.target.value.replace(/[^0-9]/g, "")), placeholder: String(AUTO_PTS[i]), "aria-label": `Points for answer ${i + 1}` })))), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "Leave the points empty to score them in the order you typed. Answers are optional: without them, players just buzz in and you judge the answer."), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement(Btn, { type: "submit" }, f.id ? "Save changes" : "Save question"), (f.id || f.q) && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => {
       setF(blankForm());
       setMsg("");
-    } }, f.id ? "Cancel editing" : "Clear"), msg && /* @__PURE__ */ React.createElement("span", { className: "flash" }, msg)), err2 === "invalid_argument" && /* @__PURE__ */ React.createElement("p", { className: "err" }, "Couldn't save. Only the game's owner or an Editor can save questions.")), items.length > 0 ? /* @__PURE__ */ React.createElement("ol", { className: "qlist" }, items.map((it, i) => /* @__PURE__ */ React.createElement("li", { key: it.id }, /* @__PURE__ */ React.createElement("div", { className: "qtext" }, /* @__PURE__ */ React.createElement("b", null, used.includes(it.id) ? "\u2713 " : "", it.q), /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, it.a.length ? it.a.map((r) => `${r[0]} (${r[1]})`).join(" \xB7 ") : "Family survey builds the board")), /* @__PURE__ */ React.createElement("div", { className: "qbtns" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => move(i, -1), disabled: i === 0, "aria-label": "Move up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => move(i, 1), disabled: i === items.length - 1, "aria-label": "Move down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => edit(it) }, "Edit"), del === it.id ? /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip chip-warn", onClick: () => {
+    } }, f.id ? "Cancel editing" : "Clear"), msg && /* @__PURE__ */ React.createElement("span", { className: "flash" }, msg)), err2 === "invalid_argument" && /* @__PURE__ */ React.createElement("p", { className: "err" }, "Couldn't save. Only the game's owner or an Editor can save questions.")), items.length > 0 ? /* @__PURE__ */ React.createElement("ol", { className: "qlist" }, items.map((it, i) => /* @__PURE__ */ React.createElement("li", { key: it.id }, /* @__PURE__ */ React.createElement("div", { className: "qtext" }, /* @__PURE__ */ React.createElement("b", null, used.includes(it.id) ? "\u2713 " : "", it.q), /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, it.a.length ? it.a.map((r) => `${r[0]} (${r[1]})`).join(" \xB7 ") : "Buzz in, you judge")), /* @__PURE__ */ React.createElement("div", { className: "qbtns" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => move(i, -1), disabled: i === 0, "aria-label": "Move up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => move(i, 1), disabled: i === items.length - 1, "aria-label": "Move down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => edit(it) }, "Edit"), del === it.id ? /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip chip-warn", onClick: () => {
       save(items.filter((x) => x.id !== it.id));
       setDel(null);
     } }, "Delete?") : /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => setDel(it.id) }, "Delete"))))) : /* @__PURE__ */ React.createElement("p", { className: "muted" }, "No questions yet. They're saved with the game, so they'll still be here on party night."));
@@ -2007,7 +2066,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     if (s.phase === "pick" || s.phase === "roundEnd") {
       const st = standings(s);
       return frame(
-        /* @__PURE__ */ React.createElement("div", { className: "phone-card" }, s.last ? /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, /* @__PURE__ */ React.createElement("span", { className: "gold" }, sideName(s, s.last.side)), " ", s.last.how === "steal" ? "stole" : "banked", " ", s.last.pts, "!") : /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, "Get ready!"), ((_j = s.sharp) == null ? void 0 : _j.includes(name)) && /* @__PURE__ */ React.createElement("p", { className: "gold text-lg" }, "Your guess was on the board. Nice!"), teamBadge, /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true }), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Next round coming up on the big screen."))
+        /* @__PURE__ */ React.createElement("div", { className: "phone-card" }, s.last ? /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, /* @__PURE__ */ React.createElement(LastResult, { s })) : /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, "Get ready!"), ((_j = s.sharp) == null ? void 0 : _j.includes(name)) && /* @__PURE__ */ React.createElement("p", { className: "gold text-lg" }, "Your guess was on the board. Nice!"), teamBadge, /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true }), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Next round coming up on the big screen."))
       );
     }
     if (s.phase === "final") {
@@ -2040,6 +2099,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
   }
   function WatchCard({ s, rec, send, title, sub, hot }) {
     var _a;
+    if (s.openQ) {
+      return /* @__PURE__ */ React.createElement("div", { className: "phone-card" + (hot ? " hot" : "") }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, title), /* @__PURE__ */ React.createElement("p", { className: "muted" }, sub), /* @__PURE__ */ React.createElement("p", { className: "phone-q big" }, s.question), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Quiet in the audience! Let them answer."));
+    }
     const mine = ((_a = rec.guess) == null ? void 0 : _a.id) === s.roundKey ? rec.guess.text : "";
     const [text, setText] = useState(mine);
     const submit = (e) => {

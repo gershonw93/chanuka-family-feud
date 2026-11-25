@@ -194,6 +194,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
 .hidden-board { flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; opacity: .35; }
 .ghost-card { border: 3px dashed rgba(255,255,255,.35); border-radius: 14px; display: grid; place-items: center; font-family: var(--display); font-size: 2rem; }
 .status { min-height: 0; }
+.stage.open { justify-content: center; gap: clamp(16px, 3vh, 36px); }
+.stage.open .question { font-size: clamp(2.2rem, 4.6vw, 5rem); }
+.stage.open .face-name { font-size: clamp(2rem, 4.2vw, 4.4rem); }
+.stage.open .face-slot { padding: 20px 18px; }
+.worth { align-self: center; text-align: center; font-weight: 700; font-size: clamp(1rem, 1.6vw, 1.5rem); color: var(--ink); background: var(--gold); border-radius: 999px; padding: .35em 1.1em; }
 .status-big { font-family: var(--display); font-size: clamp(1.6rem, 3vw, 3.2rem); text-align: center; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .3em .5em; }
 .status-mid { font-size: clamp(1.1rem, 2vw, 1.9rem); font-weight: 600; text-align: center; }
 .sharp { width: 100%; font-family: var(--body); font-size: clamp(1rem, 1.5vw, 1.4rem); color: var(--muted); font-weight: 500; }
