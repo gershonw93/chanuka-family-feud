@@ -194,6 +194,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
 .hidden-board { flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; opacity: .35; }
 .ghost-card { border: 3px dashed rgba(255,255,255,.35); border-radius: 14px; display: grid; place-items: center; font-family: var(--display); font-size: 2rem; }
 .status { min-height: 0; }
+.typed { align-self: center; text-align: center; font-size: clamp(1.1rem, 2vw, 1.9rem); font-weight: 600; padding: .3em 1em; border-radius: 14px; background: rgba(255,255,255,.08); animation: pop .4s cubic-bezier(.3,1.6,.5,1) both; }
+.typed.hit b { color: #8ff0a4; } .typed.miss b, .typed.dup b { color: #ffb4b6; }
+.typed.small { font-size: 1rem; animation: none; }
+.typed.small.hit { color: #8ff0a4; } .typed.small.miss, .typed.small.dup { color: #ffb4b6; }
+.sent-note { font-weight: 700; font-size: 1.2rem; }
 .stage.open { justify-content: center; gap: clamp(16px, 3vh, 36px); }
 .stage.open .question { font-size: clamp(2.2rem, 4.6vw, 5rem); }
 .stage.open .face-name { font-size: clamp(2rem, 4.2vw, 4.4rem); }

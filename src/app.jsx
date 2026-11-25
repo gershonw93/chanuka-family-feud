@@ -1,5 +1,5 @@
 import { QUESTIONS } from "./questions.js";
-import { rid, makeCode, clean, guessMatches, buildSurveyBoard } from "./logic.js";
+import { rid, makeCode, clean, guessMatches, buildSurveyBoard, bestCard } from "./logic.js";
 import { makeSupabaseDb } from "./supabase-db.js";
 
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
@@ -184,7 +184,7 @@ function beginRound(s, kind, opts = {}) {
   if (!opts.replace) s.roundNo += 1;
   s.roundNo = Math.max(1, s.roundNo);
   s.roundKey = rid();
-  Object.assign(s, { bank: 0, strikes: 0, control: null, controlPid: null, stealSide: null, last: null, sharp: [], note: "" });
+  Object.assign(s, { bank: 0, strikes: 0, control: null, controlPid: null, stealSide: null, last: null, sharp: [], note: "", typed: null, turn: null });
   let board = null;
   s.openQ = false;
   if (kind === "custom" || kind === "open") {
@@ -224,6 +224,19 @@ function beginRound(s, kind, opts = {}) {
     s.survey = { id: rid(), endsAt: Date.now() + total, total, done: false, empty: false };
     s.phase = "survey";
   }
+}
+
+const membersOf = (s, side) => (s.settings.mode === "teams" ? activeIds(s).filter((p) => teamOf(s, p) === side) : [side]);
+
+// Who may type an answer right now. A new id whenever a new answer is expected.
+function syncTurn(d) {
+  let pids = [];
+  if (d.phase === "faceoff" && d.face && (d.face.stage === "answer1" || d.face.stage === "answer2") && d.face.answering) pids = [d.face.answering];
+  else if (d.phase === "round" && d.control) pids = membersOf(d, d.control);
+  else if (d.phase === "steal" && d.stealSide) pids = membersOf(d, d.stealSide);
+  if (!pids.length) { d.turn = null; return; }
+  const sig = [d.roundKey, d.phase, d.face?.stage, d.face?.answering, d.control, d.stealSide, d.strikes, d.board.filter((c) => c.r).length, pids.join(",")].join("|");
+  if (!d.turn || d.turn.sig !== sig) d.turn = { id: rid(), sig, pids };
 }
 
 function giveControl(s, pid) {
@@ -688,7 +701,7 @@ function Host({ db, room, code, initial, onExit }) {
   const [xs, setXs] = useState(null);
   const [custom, setCustom] = useState("");
   const [confirmEnd, setConfirmEnd] = useState(false);
-  const [peek, setPeek] = useState(local.get("lf-peek") !== "off");
+  const [peek, setPeek] = useState(local.get("lf-peek") === "on");
   const [toolsOpen, setToolsOpen] = useState(false);
   const [library, saveLibrary, libErr] = useLibrary(db);
   const docRef = useMemo(() => db.doc("rooms/" + code), [db, code]);
@@ -704,6 +717,7 @@ function Host({ db, room, code, initial, onExit }) {
     const prev = sRef.current;
     const next = clone(prev);
     fn(next);
+    syncTurn(next);
     next.rev = (prev.rev || 0) + 1;
     if (!opts.noUndo) {
       undoStack.current.push(prev);
@@ -762,6 +776,7 @@ function Host({ db, room, code, initial, onExit }) {
 
   // Clock: survey timer and buzz resolution.
   const buzzSeen = useRef({ id: null, first: 0 });
+  const doneTurns = useRef(new Set());
   const lastTick = useRef(0);
   useEffect(() => {
     const iv = setInterval(() => {
@@ -785,6 +800,14 @@ function Host({ db, room, code, initial, onExit }) {
             declareBuzz(presses[0].pid, presses);
           }
         }
+      }
+      const t = st.turn;
+      if (t && t.id && !st.openQ && !doneTurns.current.has(t.id)) {
+        const cands = (t.pids || []).map((pid) => {
+          const r = playersRef.current[pid];
+          return r && r.answer && r.answer.id === t.id && clean(r.answer.text) ? { pid, text: r.answer.text, at: r.answer.at || 0 } : null;
+        }).filter(Boolean).sort((a, b) => a.at - b.at);
+        if (cands.length) { doneTurns.current.add(t.id); judgeTyped(t.id, cands[0].pid, cands[0].text); }
       }
     }, 150);
     return () => clearInterval(iv);
@@ -835,7 +858,7 @@ function Host({ db, room, code, initial, onExit }) {
     f.stage = "ready";
   });
 
-  const faceAnswer = (idx) => commit((d) => {
+  const faceAnswerD = (d, idx) => {
     const f = d.face;
     const pid = f.answering;
     let pts = 0;
@@ -849,11 +872,12 @@ function Host({ db, room, code, initial, onExit }) {
       d.fx = fx("strike", { n: 1 });
     }
     if (f.stage === "answer1") {
-      if (idx === 0 || allRevealed(d)) { giveControl(d, pid); if (allRevealed(d)) endRound(d, d.control, "cleared", playersRef.current); return; }
+      // Any answer on the board wins control for the buzzer's side.
+      if (idx >= 0 || allRevealed(d)) { giveControl(d, pid); if (allRevealed(d)) endRound(d, d.control, "cleared", playersRef.current); return; }
       f.first = { pid, idx, pts };
       f.answering = pid === f.p1 ? f.p2 : f.p1;
       f.stage = "answer2";
-      d.note = idx < 0 ? `Not on the board! ${nameOf(d, f.answering)}, your turn.` : `${nameOf(d, f.answering)} can beat it with a higher answer.`;
+      d.note = `Not on the board! ${nameOf(d, f.answering)}, your turn.`;
     } else if (f.stage === "answer2") {
       const first = f.first || { pts: 0, idx: -1 };
       if (first.idx < 0 && idx < 0) {
@@ -868,7 +892,8 @@ function Host({ db, room, code, initial, onExit }) {
       giveControl(d, winner);
       if (allRevealed(d)) endRound(d, d.control, "cleared", playersRef.current);
     }
-  });
+  };
+  const faceAnswer = (idx) => commit((d) => faceAnswerD(d, idx));
 
   // Board-free rounds: the host judges the spoken answer.
   const judge = (correct) => commit((d) => {
@@ -894,17 +919,29 @@ function Host({ db, room, code, initial, onExit }) {
       d.note = "Both missed. Buzz again, or move on.";
     }
   });
+  // A phone typed its answer: compare it with the hidden cards and play it.
+  const judgeTyped = (turnId, pid, text) => commit((d) => {
+    if (!d.turn || d.turn.id !== turnId || d.openQ) return;
+    const idx = bestCard(d.board, text);
+    const dup = idx >= 0 && d.board[idx].r;
+    d.typed = { name: nameOf(d, pid), text: clean(text, 40), verdict: idx < 0 ? "miss" : dup ? "dup" : "hit", k: rid() };
+    if (d.phase === "faceoff") faceAnswerD(d, dup ? -1 : idx);
+    else if (d.phase === "round") { if (idx >= 0 && !dup) roundRevealD(d, idx); else roundStrikeD(d); }
+    else if (d.phase === "steal") stealAnswerD(d, dup ? -1 : idx);
+  });
+
   const nobodyGotIt = () => commit((d) => { d.bank = 0; endRound(d, null, "none", playersRef.current); d.fx = fx("strike", { n: 1 }); });
 
-  const roundReveal = (idx) => commit((d) => {
+  const roundRevealD = (d, idx) => {
     if (!d.board[idx] || d.board[idx].r) return;
     d.board[idx].r = true;
     d.bank += d.board[idx].p;
     d.fx = fx("flip");
     if (allRevealed(d)) endRound(d, d.control, "cleared", playersRef.current);
-  });
+  };
+  const roundReveal = (idx) => commit((d) => roundRevealD(d, idx));
 
-  const roundStrike = () => commit((d) => {
+  const roundStrikeD = (d) => {
     d.strikes += 1;
     d.fx = fx("strike", { n: d.strikes });
     if (d.strikes >= 3) {
@@ -912,7 +949,8 @@ function Host({ db, room, code, initial, onExit }) {
       d.stealSide = otherSide(d, d.control);
       d.note = `${sideName(d, d.stealSide)} can steal with one answer`;
     }
-  });
+  };
+  const roundStrike = () => commit((d) => roundStrikeD(d));
 
   const passControl = () => commit((d) => {
     d.control = otherSide(d, d.control);
@@ -920,7 +958,7 @@ function Host({ db, room, code, initial, onExit }) {
     d.note = `${sideName(d, d.control)} has control`;
   });
 
-  const stealAnswer = (idx) => commit((d) => {
+  const stealAnswerD = (d, idx) => {
     if (idx >= 0 && d.board[idx] && !d.board[idx].r) {
       d.board[idx].r = true;
       d.bank += d.board[idx].p;
@@ -929,7 +967,8 @@ function Host({ db, room, code, initial, onExit }) {
       endRound(d, d.control, "held", playersRef.current);
       d.fx = fx("strike", { n: 1 });
     }
-  });
+  };
+  const stealAnswer = (idx) => commit((d) => stealAnswerD(d, idx));
 
   const finishSurvey = (force) => commit((d) => {
     if (d.phase !== "survey" || !d.survey || (d.survey.done && !force)) return;
@@ -1305,7 +1344,10 @@ function Host({ db, room, code, initial, onExit }) {
     } else if (s.openQ) {
       controls = (
         <div className="flex gap-3 flex-wrap items-center">
-          <span className="note"><b className="gold">{nameOf(s, f.answering)}</b>, say your answer!</span>
+          <span className="note"><b className="gold">{nameOf(s, f.answering)}</b>, say your answer!{(() => {
+            const r = players[f.answering];
+            return r?.answer?.id === s.turn?.id && clean(r?.answer?.text) ? <> Typed: <b className="gold">“{clean(r.answer.text, 40)}”</b></> : null;
+          })()}</span>
           <Btn big onClick={() => judge(true)}>Correct (+{s.settings.openPts || 10})</Btn>
           <Btn kind="red" big onClick={() => judge(false)}>Wrong</Btn>
         </div>
@@ -1313,7 +1355,7 @@ function Host({ db, room, code, initial, onExit }) {
     } else {
       controls = (
         <div className="flex gap-3 flex-wrap items-center">
-          <span className="note"><b className="gold">{nameOf(s, f.answering)}</b>, say your answer! Tap the matching card.</span>
+          <span className="note"><b className="gold">{nameOf(s, f.answering)}</b>, say it and type it on your phone. Or tap the matching card.</span>
           <Btn kind="red" big onClick={() => faceAnswer(-1)}>Not on the board</Btn>
         </div>
       );
@@ -1327,7 +1369,7 @@ function Host({ db, room, code, initial, onExit }) {
     );
     controls = (
       <div className="flex gap-3 flex-wrap items-center">
-        <span className="note">Tap a card for a correct answer.</span>
+        <span className="note">Phones type the answers. You can also tap a card.</span>
         <Btn kind="red" big onClick={roundStrike}>Strike</Btn>
         {s.strikes === 0 && s.board.filter((c) => c.r).length <= 1 && <Btn kind="ghost" onClick={passControl}>Pass to {sideName(s, otherSide(s, s.control))}</Btn>}
       </div>
@@ -1387,6 +1429,12 @@ function Host({ db, room, code, initial, onExit }) {
           {showBoard ? (
             <div className="board-wrap">
               <Board board={s.board} onTap={onTapCard} canTap={canTapBoard} host peek={peek} />
+              {s.typed && (s.phase === "faceoff" || s.phase === "round" || s.phase === "steal" || s.phase === "roundEnd") && (
+                <div className={"typed " + s.typed.verdict} key={s.typed.k}>
+                  {s.typed.name} typed “{s.typed.text}”
+                  <b>{s.typed.verdict === "hit" ? " ✓ On the board!" : s.typed.verdict === "dup" ? " Already up there!" : " ✕ Not on the board"}</b>
+                </div>
+              )}
               <div className="bank"><span>Round bank</span><b>{s.bank}</b></div>
             </div>
           ) : s.phase === "pick" || s.phase === "roundEnd" ? (
@@ -1853,8 +1901,9 @@ function Phone({ db, room, code, name, onLeave }) {
         return frame(
           <div className={"buzz-outcome " + (me ? "won" : "lost")}>
             <div className="display outcome-title">{me ? "You buzzed first!" : "Too slow!"}</div>
-            <p className="text-xl">{me ? "Say your answer out loud!" : `${nameOf(s, winner)} got there first. Buzzers locked.`}</p>
-            {f.stage === "answer2" && f.answering === pid && <p className="text-xl gold mt-4">Your turn to answer now!</p>}
+            <p className="text-xl">{me ? "Say your answer out loud, then type it!" : `${nameOf(s, winner)} got there first. Buzzers locked.`}</p>
+            {f.stage === "answer2" && f.answering === pid && <p className="text-xl gold mt-4">Your turn! Say it, then type it.</p>}
+            {s.turn?.pids?.includes(pid) && <AnswerBox key={s.turn.id} s={s} rec={rec} send={send} label={s.openQ ? "Type what you said. The host decides." : "Type what you said"} />}
           </div>, { cls: "phone-buzz" }
         );
       }
@@ -1893,7 +1942,10 @@ function Phone({ db, room, code, name, onLeave }) {
     const title = s.phase === "steal"
       ? (mine ? "Your side can steal!" : `${sideName(s, s.stealSide)} is trying to steal`)
       : (mine ? "Your side is guessing!" : `${sideName(s, s.control)} is guessing`);
-    return frame(<WatchCard key={s.roundKey} s={s} rec={rec} send={send} title={title} sub={`Bank: ${s.bank} · Strikes: ${s.strikes}`} hot={mine} />);
+    const answer = s.turn?.pids?.includes(pid)
+      ? <AnswerBox key={s.turn.id} s={s} rec={rec} send={send} label={s.phase === "steal" ? "One answer to steal. Agree as a team, then type it" : "Type your team's next answer"} />
+      : null;
+    return frame(<WatchCard key={s.roundKey} s={s} rec={rec} send={send} title={title} sub={`Bank: ${s.bank} · Strikes: ${s.strikes}`} hot={mine} answer={answer} />);
   }
 
   if (s.phase === "pick" || s.phase === "roundEnd") {
@@ -1928,6 +1980,26 @@ function Phone({ db, room, code, name, onLeave }) {
   return frame(<div className="phone-card"><p>Watch the big screen.</p></div>);
 }
 
+function AnswerBox({ s, rec, send, label }) {
+  const t = s.turn;
+  const [text, setText] = useState("");
+  if (!t) return null;
+  if (rec.answer?.id === t.id) return <p className="sent-note">Sent “{rec.answer.text}”. Watch the big screen!</p>;
+  return (
+    <form className="guess-form" onSubmit={(e) => {
+      e.preventDefault();
+      const v = clean(text, 40);
+      if (v) send({ answer: { id: t.id, text: v, at: Date.now() } });
+    }}>
+      <label className="field">
+        <span>{label}</span>
+        <input id="answer-box" className="input big-input" value={text} maxLength={40} onChange={(e) => setText(e.target.value)} placeholder="Type your answer" autoComplete="off" />
+      </label>
+      <button type="submit" className="btn btn-gold btn-big w-full" disabled={!clean(text)}>Send answer</button>
+    </form>
+  );
+}
+
 function SurveyCard({ s, rec, send, hostNow }) {
   const mine = rec.survey?.id === s.survey?.id ? rec.survey.text : "";
   const [text, setText] = useState(mine);
@@ -1953,7 +2025,7 @@ function SurveyCard({ s, rec, send, hostNow }) {
   );
 }
 
-function WatchCard({ s, rec, send, title, sub, hot }) {
+function WatchCard({ s, rec, send, title, sub, hot, answer }) {
   if (s.openQ) {
     return (
       <div className={"phone-card" + (hot ? " hot" : "")}>
@@ -1977,14 +2049,15 @@ function WatchCard({ s, rec, send, title, sub, hot }) {
       <h2 className="display text-3xl">{title}</h2>
       <p className="muted">{sub}</p>
       <p className="phone-q">{s.question}</p>
-      <form onSubmit={submit} className="guess-form">
+      {s.typed && <p className={"typed small " + s.typed.verdict}>{s.typed.name}: “{s.typed.text}” {s.typed.verdict === "hit" ? "✓" : s.typed.verdict === "dup" ? "(already up)" : "✕"}</p>}
+      {answer ? answer : <form onSubmit={submit} className="guess-form">
         <label className="field">
           <span>Your secret guess for the board</span>
           <input id="watch-guess" className="input" value={text} maxLength={32} onChange={(e) => setText(e.target.value)} placeholder="Type one short guess" autoComplete="off" />
         </label>
         <button type="submit" className="btn btn-blue w-full" disabled={!clean(text) || clean(text) === mine}>{mine ? (clean(text) === mine ? "Guess saved ✓" : "Change guess") : "Save guess"}</button>
-      </form>
-      <p className="muted text-sm">If it shows up on the board, you'll get a shout-out after the round.</p>
+      </form>}
+      {!answer && <p className="muted text-sm">If it shows up on the board, you'll get a shout-out after the round.</p>}
     </div>
   );
 }

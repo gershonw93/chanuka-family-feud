@@ -194,6 +194,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
 .hidden-board { flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; opacity: .35; }
 .ghost-card { border: 3px dashed rgba(255,255,255,.35); border-radius: 14px; display: grid; place-items: center; font-family: var(--display); font-size: 2rem; }
 .status { min-height: 0; }
+.typed { align-self: center; text-align: center; font-size: clamp(1.1rem, 2vw, 1.9rem); font-weight: 600; padding: .3em 1em; border-radius: 14px; background: rgba(255,255,255,.08); animation: pop .4s cubic-bezier(.3,1.6,.5,1) both; }
+.typed.hit b { color: #8ff0a4; } .typed.miss b, .typed.dup b { color: #ffb4b6; }
+.typed.small { font-size: 1rem; animation: none; }
+.typed.small.hit { color: #8ff0a4; } .typed.small.miss, .typed.small.dup { color: #ffb4b6; }
+.sent-note { font-weight: 700; font-size: 1.2rem; }
 .stage.open { justify-content: center; gap: clamp(16px, 3vh, 36px); }
 .stage.open .question { font-size: clamp(2.2rem, 4.6vw, 5rem); }
 .stage.open .face-name { font-size: clamp(2rem, 4.2vw, 4.4rem); }
@@ -441,6 +446,29 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       const best = Object.values(g.spell).sort((x, y) => y.c - x.c)[0].t;
       return { t: best.charAt(0).toUpperCase() + best.slice(1), p: g.count * 10, n: g.count, r: false };
     });
+  }
+  var KEYSTOP = /* @__PURE__ */ new Set([...STOP, "with", "for", "on", "in", "at", "it", "is", "your", "you", "they", "them", "that", "this", "too", "very", "all", "out", "up", "get", "who", "what", "when", "something", "thing", "stuff", "people", "everyone", "someone"]);
+  function matchScore(guess, answer) {
+    const g = norm(guess), a = norm(answer);
+    if (!g || !a) return 0;
+    if (similar(g, a)) return 3;
+    if (a.length >= 4 && ` ${g} `.includes(` ${a} `)) return 2;
+    if (g.length >= 4 && ` ${a} `.includes(` ${g} `)) return 2;
+    const words = (s) => s.split(" ").filter((w) => w.length >= 4 && !KEYSTOP.has(w));
+    const aw = words(a);
+    for (const w of words(g)) if (aw.some((x) => similar(w, x))) return 1;
+    return 0;
+  }
+  function bestCard(board, guess) {
+    let best = -1, score = 0;
+    board.forEach((c, i) => {
+      const sc = matchScore(guess, c.t);
+      if (sc > score) {
+        score = sc;
+        best = i;
+      }
+    });
+    return best;
   }
 
   // src/supabase-db.js
@@ -811,7 +839,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     if (!opts.replace) s.roundNo += 1;
     s.roundNo = Math.max(1, s.roundNo);
     s.roundKey = rid();
-    Object.assign(s, { bank: 0, strikes: 0, control: null, controlPid: null, stealSide: null, last: null, sharp: [], note: "" });
+    Object.assign(s, { bank: 0, strikes: 0, control: null, controlPid: null, stealSide: null, last: null, sharp: [], note: "", typed: null, turn: null });
     let board = null;
     s.openQ = false;
     if (kind === "custom" || kind === "open") {
@@ -851,6 +879,20 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       s.survey = { id: rid(), endsAt: Date.now() + total, total, done: false, empty: false };
       s.phase = "survey";
     }
+  }
+  var membersOf = (s, side) => s.settings.mode === "teams" ? activeIds(s).filter((p) => teamOf(s, p) === side) : [side];
+  function syncTurn(d) {
+    var _a, _b;
+    let pids = [];
+    if (d.phase === "faceoff" && d.face && (d.face.stage === "answer1" || d.face.stage === "answer2") && d.face.answering) pids = [d.face.answering];
+    else if (d.phase === "round" && d.control) pids = membersOf(d, d.control);
+    else if (d.phase === "steal" && d.stealSide) pids = membersOf(d, d.stealSide);
+    if (!pids.length) {
+      d.turn = null;
+      return;
+    }
+    const sig = [d.roundKey, d.phase, (_a = d.face) == null ? void 0 : _a.stage, (_b = d.face) == null ? void 0 : _b.answering, d.control, d.stealSide, d.strikes, d.board.filter((c) => c.r).length, pids.join(",")].join("|");
+    if (!d.turn || d.turn.sig !== sig) d.turn = { id: rid(), sig, pids };
   }
   function giveControl(s, pid) {
     s.control = sideOf(s, pid);
@@ -1273,7 +1315,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     const [xs, setXs] = useState(null);
     const [custom, setCustom] = useState("");
     const [confirmEnd, setConfirmEnd] = useState(false);
-    const [peek, setPeek] = useState(local.get("lf-peek") !== "off");
+    const [peek, setPeek] = useState(local.get("lf-peek") === "on");
     const [toolsOpen, setToolsOpen] = useState(false);
     const [library, saveLibrary, libErr] = useLibrary(db);
     const docRef = useMemo(() => db.doc("rooms/" + code), [db, code]);
@@ -1290,6 +1332,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       const prev = sRef.current;
       const next = clone(prev);
       fn(next);
+      syncTurn(next);
       next.rev = (prev.rev || 0) + 1;
       if (!opts.noUndo) {
         undoStack.current.push(prev);
@@ -1354,6 +1397,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       }, { noUndo: true });
     }, [players]);
     const buzzSeen = useRef({ id: null, first: 0 });
+    const doneTurns = useRef(/* @__PURE__ */ new Set());
     const lastTick = useRef(0);
     useEffect(() => {
       const iv = setInterval(() => {
@@ -1383,6 +1427,17 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
               presses.sort((x, y) => x.at - y.at);
               declareBuzz(presses[0].pid, presses);
             }
+          }
+        }
+        const t = st2.turn;
+        if (t && t.id && !st2.openQ && !doneTurns.current.has(t.id)) {
+          const cands = (t.pids || []).map((pid) => {
+            const r = playersRef.current[pid];
+            return r && r.answer && r.answer.id === t.id && clean(r.answer.text) ? { pid, text: r.answer.text, at: r.answer.at || 0 } : null;
+          }).filter(Boolean).sort((a, b) => a.at - b.at);
+          if (cands.length) {
+            doneTurns.current.add(t.id);
+            judgeTyped(t.id, cands[0].pid, cands[0].text);
           }
         }
       }, 150);
@@ -1430,7 +1485,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       d.buzz = { id: rid(), open: false, winner: null, times: null };
       f.stage = "ready";
     });
-    const faceAnswer = (idx) => commit((d) => {
+    const faceAnswerD = (d, idx) => {
       const f = d.face;
       const pid = f.answering;
       let pts = 0;
@@ -1444,7 +1499,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
         d.fx = fx("strike", { n: 1 });
       }
       if (f.stage === "answer1") {
-        if (idx === 0 || allRevealed(d)) {
+        if (idx >= 0 || allRevealed(d)) {
           giveControl(d, pid);
           if (allRevealed(d)) endRound(d, d.control, "cleared", playersRef.current);
           return;
@@ -1452,7 +1507,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
         f.first = { pid, idx, pts };
         f.answering = pid === f.p1 ? f.p2 : f.p1;
         f.stage = "answer2";
-        d.note = idx < 0 ? `Not on the board! ${nameOf(d, f.answering)}, your turn.` : `${nameOf(d, f.answering)} can beat it with a higher answer.`;
+        d.note = `Not on the board! ${nameOf(d, f.answering)}, your turn.`;
       } else if (f.stage === "answer2") {
         const first = f.first || { pts: 0, idx: -1 };
         if (first.idx < 0 && idx < 0) {
@@ -1467,7 +1522,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
         giveControl(d, winner);
         if (allRevealed(d)) endRound(d, d.control, "cleared", playersRef.current);
       }
-    });
+    };
+    const faceAnswer = (idx) => commit((d) => faceAnswerD(d, idx));
     const judge = (correct) => commit((d) => {
       const f = d.face;
       if (!f || !f.answering) return;
@@ -1491,19 +1547,31 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
         d.note = "Both missed. Buzz again, or move on.";
       }
     });
+    const judgeTyped = (turnId, pid, text) => commit((d) => {
+      if (!d.turn || d.turn.id !== turnId || d.openQ) return;
+      const idx = bestCard(d.board, text);
+      const dup = idx >= 0 && d.board[idx].r;
+      d.typed = { name: nameOf(d, pid), text: clean(text, 40), verdict: idx < 0 ? "miss" : dup ? "dup" : "hit", k: rid() };
+      if (d.phase === "faceoff") faceAnswerD(d, dup ? -1 : idx);
+      else if (d.phase === "round") {
+        if (idx >= 0 && !dup) roundRevealD(d, idx);
+        else roundStrikeD(d);
+      } else if (d.phase === "steal") stealAnswerD(d, dup ? -1 : idx);
+    });
     const nobodyGotIt = () => commit((d) => {
       d.bank = 0;
       endRound(d, null, "none", playersRef.current);
       d.fx = fx("strike", { n: 1 });
     });
-    const roundReveal = (idx) => commit((d) => {
+    const roundRevealD = (d, idx) => {
       if (!d.board[idx] || d.board[idx].r) return;
       d.board[idx].r = true;
       d.bank += d.board[idx].p;
       d.fx = fx("flip");
       if (allRevealed(d)) endRound(d, d.control, "cleared", playersRef.current);
-    });
-    const roundStrike = () => commit((d) => {
+    };
+    const roundReveal = (idx) => commit((d) => roundRevealD(d, idx));
+    const roundStrikeD = (d) => {
       d.strikes += 1;
       d.fx = fx("strike", { n: d.strikes });
       if (d.strikes >= 3) {
@@ -1511,13 +1579,14 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
         d.stealSide = otherSide(d, d.control);
         d.note = `${sideName(d, d.stealSide)} can steal with one answer`;
       }
-    });
+    };
+    const roundStrike = () => commit((d) => roundStrikeD(d));
     const passControl = () => commit((d) => {
       d.control = otherSide(d, d.control);
       d.controlPid = null;
       d.note = `${sideName(d, d.control)} has control`;
     });
-    const stealAnswer = (idx) => commit((d) => {
+    const stealAnswerD = (d, idx) => {
       if (idx >= 0 && d.board[idx] && !d.board[idx].r) {
         d.board[idx].r = true;
         d.bank += d.board[idx].p;
@@ -1526,7 +1595,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
         endRound(d, d.control, "held", playersRef.current);
         d.fx = fx("strike", { n: 1 });
       }
-    });
+    };
+    const stealAnswer = (idx) => commit((d) => stealAnswerD(d, idx));
     const finishSurvey = (force) => commit((d) => {
       if (d.phase !== "survey" || !d.survey || d.survey.done && !force) return;
       const texts = Object.values(playersRef.current).filter((r) => {
@@ -1805,13 +1875,17 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       } else if (f.stage === "open") {
         controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, "Waiting for a buzz\u2026"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: resetBuzzers }, "Reset buzzers"), /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, "Phone trouble? Tap who was first:"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => declareBuzz(f.p1) }, nameOf(s, f.p1)), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => declareBuzz(f.p2) }, nameOf(s, f.p2)));
       } else if (s.openQ) {
-        controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, /* @__PURE__ */ React.createElement("b", { className: "gold" }, nameOf(s, f.answering)), ", say your answer!"), /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: () => judge(true) }, "Correct (+", s.settings.openPts || 10, ")"), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: () => judge(false) }, "Wrong"));
+        controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, /* @__PURE__ */ React.createElement("b", { className: "gold" }, nameOf(s, f.answering)), ", say your answer!", (() => {
+          var _a2, _b2, _c2;
+          const r = players[f.answering];
+          return ((_a2 = r == null ? void 0 : r.answer) == null ? void 0 : _a2.id) === ((_b2 = s.turn) == null ? void 0 : _b2.id) && clean((_c2 = r == null ? void 0 : r.answer) == null ? void 0 : _c2.text) ? /* @__PURE__ */ React.createElement(React.Fragment, null, " Typed: ", /* @__PURE__ */ React.createElement("b", { className: "gold" }, "\u201C", clean(r.answer.text, 40), "\u201D")) : null;
+        })()), /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: () => judge(true) }, "Correct (+", s.settings.openPts || 10, ")"), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: () => judge(false) }, "Wrong"));
       } else {
-        controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, /* @__PURE__ */ React.createElement("b", { className: "gold" }, nameOf(s, f.answering)), ", say your answer! Tap the matching card."), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: () => faceAnswer(-1) }, "Not on the board"));
+        controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, /* @__PURE__ */ React.createElement("b", { className: "gold" }, nameOf(s, f.answering)), ", say it and type it on your phone. Or tap the matching card."), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: () => faceAnswer(-1) }, "Not on the board"));
       }
     } else if (s.phase === "round") {
       status = /* @__PURE__ */ React.createElement("div", { className: "status-big" }, /* @__PURE__ */ React.createElement("span", { className: "gold" }, sideName(s, s.control)), " is guessing", /* @__PURE__ */ React.createElement(Strikes, { n: s.strikes }));
-      controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, "Tap a card for a correct answer."), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: roundStrike }, "Strike"), s.strikes === 0 && s.board.filter((c) => c.r).length <= 1 && /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: passControl }, "Pass to ", sideName(s, otherSide(s, s.control))));
+      controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, "Phones type the answers. You can also tap a card."), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: roundStrike }, "Strike"), s.strikes === 0 && s.board.filter((c) => c.r).length <= 1 && /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: passControl }, "Pass to ", sideName(s, otherSide(s, s.control))));
     } else if (s.phase === "steal") {
       status = /* @__PURE__ */ React.createElement("div", { className: "status-big" }, /* @__PURE__ */ React.createElement("span", { className: "gold" }, sideName(s, s.stealSide)), ", one guess to steal ", s.bank, " points!");
       controls = /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("span", { className: "note" }, "Tap the card if they got it."), /* @__PURE__ */ React.createElement(Btn, { kind: "red", big: true, onClick: () => stealAnswer(-1) }, "Steal missed"));
@@ -1822,7 +1896,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       return /* @__PURE__ */ React.createElement("div", { className: "screen host final" }, header, /* @__PURE__ */ React.createElement(Confetti, null), /* @__PURE__ */ React.createElement("main", { className: "final-main" }, /* @__PURE__ */ React.createElement("p", { className: "eyebrow" }, "And the winner is\u2026"), /* @__PURE__ */ React.createElement("h1", { className: "display winner" }, winners.map((w) => w.name).join(" & ")), /* @__PURE__ */ React.createElement("p", { className: "status-mid" }, top, " points", winners.length > 1 ? " each. It's a tie!" : ""), /* @__PURE__ */ React.createElement("ol", { className: "final-list" }, st.map((x, i) => /* @__PURE__ */ React.createElement("li", { key: x.side, className: i === 0 || x.score === top ? "top" : "" }, /* @__PURE__ */ React.createElement("span", null, x.name), /* @__PURE__ */ React.createElement("b", null, x.score)))), /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 flex-wrap justify-center" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: playAgain }, "Play again"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: onExit }, "Close game"))));
     }
     const showBoard = s.board.length > 0 && (s.phase === "faceoff" || s.phase === "round" || s.phase === "steal" || s.phase === "roundEnd");
-    return /* @__PURE__ */ React.createElement("div", { className: "screen host" }, header, syncBanner, /* @__PURE__ */ React.createElement(StrikeOverlay, { n: xs == null ? void 0 : xs.n, k: xs == null ? void 0 : xs.k }), /* @__PURE__ */ React.createElement("main", { className: "game " + (isTeams ? "teams" : "solo") }, isTeams && /* @__PURE__ */ React.createElement(ScoreBox, { side: "A" }), /* @__PURE__ */ React.createElement("section", { className: "stage" + (s.openQ && s.phase === "faceoff" ? " open" : "") }, s.question && s.phase !== "pick" && /* @__PURE__ */ React.createElement("h1", { className: "question" }, s.question), s.openQ && s.phase === "faceoff" && /* @__PURE__ */ React.createElement("div", { className: "worth" }, "Buzz in and say your answer \xB7 worth ", s.settings.openPts || 10, " points"), showBoard ? /* @__PURE__ */ React.createElement("div", { className: "board-wrap" }, /* @__PURE__ */ React.createElement(Board, { board: s.board, onTap: onTapCard, canTap: canTapBoard, host: true, peek }), /* @__PURE__ */ React.createElement("div", { className: "bank" }, /* @__PURE__ */ React.createElement("span", null, "Round bank"), /* @__PURE__ */ React.createElement("b", null, s.bank))) : s.phase === "pick" || s.phase === "roundEnd" ? /* @__PURE__ */ React.createElement(ScoreTable, { st }) : null, s.phase === "survey" && !((_k = s.survey) == null ? void 0 : _k.empty) && /* @__PURE__ */ React.createElement("div", { className: "hidden-board" }, Array.from({ length: 7 }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "ghost-card" }, "?"))), /* @__PURE__ */ React.createElement("div", { className: "status" }, status)), isTeams ? /* @__PURE__ */ React.createElement(ScoreBox, { side: "B" }) : /* @__PURE__ */ React.createElement("aside", { className: "solo-scores" }, /* @__PURE__ */ React.createElement("h3", { className: "display" }, "Scores"), /* @__PURE__ */ React.createElement("ol", null, st.map((x) => /* @__PURE__ */ React.createElement("li", { key: x.side, className: (s.control === x.side && (s.phase === "round" || s.phase === "steal") ? "in-control " : "") + (s.stealSide === x.side && s.phase === "steal" ? "stealing" : "") }, /* @__PURE__ */ React.createElement("span", null, x.name), /* @__PURE__ */ React.createElement("b", null, x.score)))))), s.phase === "roundEnd" && showBoard && /* @__PURE__ */ React.createElement("div", { className: "round-scores" }, /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true })), /* @__PURE__ */ React.createElement("footer", { className: "host-controls" }, controls));
+    return /* @__PURE__ */ React.createElement("div", { className: "screen host" }, header, syncBanner, /* @__PURE__ */ React.createElement(StrikeOverlay, { n: xs == null ? void 0 : xs.n, k: xs == null ? void 0 : xs.k }), /* @__PURE__ */ React.createElement("main", { className: "game " + (isTeams ? "teams" : "solo") }, isTeams && /* @__PURE__ */ React.createElement(ScoreBox, { side: "A" }), /* @__PURE__ */ React.createElement("section", { className: "stage" + (s.openQ && s.phase === "faceoff" ? " open" : "") }, s.question && s.phase !== "pick" && /* @__PURE__ */ React.createElement("h1", { className: "question" }, s.question), s.openQ && s.phase === "faceoff" && /* @__PURE__ */ React.createElement("div", { className: "worth" }, "Buzz in and say your answer \xB7 worth ", s.settings.openPts || 10, " points"), showBoard ? /* @__PURE__ */ React.createElement("div", { className: "board-wrap" }, /* @__PURE__ */ React.createElement(Board, { board: s.board, onTap: onTapCard, canTap: canTapBoard, host: true, peek }), s.typed && (s.phase === "faceoff" || s.phase === "round" || s.phase === "steal" || s.phase === "roundEnd") && /* @__PURE__ */ React.createElement("div", { className: "typed " + s.typed.verdict, key: s.typed.k }, s.typed.name, " typed \u201C", s.typed.text, "\u201D", /* @__PURE__ */ React.createElement("b", null, s.typed.verdict === "hit" ? " \u2713 On the board!" : s.typed.verdict === "dup" ? " Already up there!" : " \u2715 Not on the board")), /* @__PURE__ */ React.createElement("div", { className: "bank" }, /* @__PURE__ */ React.createElement("span", null, "Round bank"), /* @__PURE__ */ React.createElement("b", null, s.bank))) : s.phase === "pick" || s.phase === "roundEnd" ? /* @__PURE__ */ React.createElement(ScoreTable, { st }) : null, s.phase === "survey" && !((_k = s.survey) == null ? void 0 : _k.empty) && /* @__PURE__ */ React.createElement("div", { className: "hidden-board" }, Array.from({ length: 7 }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "ghost-card" }, "?"))), /* @__PURE__ */ React.createElement("div", { className: "status" }, status)), isTeams ? /* @__PURE__ */ React.createElement(ScoreBox, { side: "B" }) : /* @__PURE__ */ React.createElement("aside", { className: "solo-scores" }, /* @__PURE__ */ React.createElement("h3", { className: "display" }, "Scores"), /* @__PURE__ */ React.createElement("ol", null, st.map((x) => /* @__PURE__ */ React.createElement("li", { key: x.side, className: (s.control === x.side && (s.phase === "round" || s.phase === "steal") ? "in-control " : "") + (s.stealSide === x.side && s.phase === "steal" ? "stealing" : "") }, /* @__PURE__ */ React.createElement("span", null, x.name), /* @__PURE__ */ React.createElement("b", null, x.score)))))), s.phase === "roundEnd" && showBoard && /* @__PURE__ */ React.createElement("div", { className: "round-scores" }, /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true })), /* @__PURE__ */ React.createElement("footer", { className: "host-controls" }, controls));
   }
   function sanitizeItems(raw) {
     if (!Array.isArray(raw)) return [];
@@ -1944,7 +2018,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     return /* @__PURE__ */ React.createElement("div", { className: "score-table" + (inline ? " inline" : "") }, !inline && /* @__PURE__ */ React.createElement("h2", { className: "display" }, "Scoreboard"), /* @__PURE__ */ React.createElement("ol", null, st.map((x, i) => /* @__PURE__ */ React.createElement("li", { key: x.side }, /* @__PURE__ */ React.createElement("span", { className: "rank" }, i + 1), /* @__PURE__ */ React.createElement("span", { className: "nm" }, x.name), /* @__PURE__ */ React.createElement("b", null, x.score)))));
   }
   function Phone({ db, room, code, name, onLeave }) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p;
     const pid = useMemo(myPid, []);
     const recRef = useRef({ pid, code, name, team: null, v: 0, joinedAt: Date.now(), buzz: null, survey: null, guess: null });
     const [rec, setRec] = useState(recRef.current);
@@ -2024,7 +2098,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
         if (winner) {
           const me = winner === pid;
           return frame(
-            /* @__PURE__ */ React.createElement("div", { className: "buzz-outcome " + (me ? "won" : "lost") }, /* @__PURE__ */ React.createElement("div", { className: "display outcome-title" }, me ? "You buzzed first!" : "Too slow!"), /* @__PURE__ */ React.createElement("p", { className: "text-xl" }, me ? "Say your answer out loud!" : `${nameOf(s, winner)} got there first. Buzzers locked.`), f.stage === "answer2" && f.answering === pid && /* @__PURE__ */ React.createElement("p", { className: "text-xl gold mt-4" }, "Your turn to answer now!")),
+            /* @__PURE__ */ React.createElement("div", { className: "buzz-outcome " + (me ? "won" : "lost") }, /* @__PURE__ */ React.createElement("div", { className: "display outcome-title" }, me ? "You buzzed first!" : "Too slow!"), /* @__PURE__ */ React.createElement("p", { className: "text-xl" }, me ? "Say your answer out loud, then type it!" : `${nameOf(s, winner)} got there first. Buzzers locked.`), f.stage === "answer2" && f.answering === pid && /* @__PURE__ */ React.createElement("p", { className: "text-xl gold mt-4" }, "Your turn! Say it, then type it."), ((_k = (_j = s.turn) == null ? void 0 : _j.pids) == null ? void 0 : _k.includes(pid)) && /* @__PURE__ */ React.createElement(AnswerBox, { key: s.turn.id, s, rec, send, label: s.openQ ? "Type what you said. The host decides." : "Type what you said" })),
             { cls: "phone-buzz" }
           );
         }
@@ -2061,23 +2135,36 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     if (s.phase === "round" || s.phase === "steal") {
       const mine = s.phase === "steal" ? s.stealSide === mySide : s.control === mySide;
       const title = s.phase === "steal" ? mine ? "Your side can steal!" : `${sideName(s, s.stealSide)} is trying to steal` : mine ? "Your side is guessing!" : `${sideName(s, s.control)} is guessing`;
-      return frame(/* @__PURE__ */ React.createElement(WatchCard, { key: s.roundKey, s, rec, send, title, sub: `Bank: ${s.bank} \xB7 Strikes: ${s.strikes}`, hot: mine }));
+      const answer = ((_m = (_l = s.turn) == null ? void 0 : _l.pids) == null ? void 0 : _m.includes(pid)) ? /* @__PURE__ */ React.createElement(AnswerBox, { key: s.turn.id, s, rec, send, label: s.phase === "steal" ? "One answer to steal. Agree as a team, then type it" : "Type your team's next answer" }) : null;
+      return frame(/* @__PURE__ */ React.createElement(WatchCard, { key: s.roundKey, s, rec, send, title, sub: `Bank: ${s.bank} \xB7 Strikes: ${s.strikes}`, hot: mine, answer }));
     }
     if (s.phase === "pick" || s.phase === "roundEnd") {
       const st = standings(s);
       return frame(
-        /* @__PURE__ */ React.createElement("div", { className: "phone-card" }, s.last ? /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, /* @__PURE__ */ React.createElement(LastResult, { s })) : /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, "Get ready!"), ((_j = s.sharp) == null ? void 0 : _j.includes(name)) && /* @__PURE__ */ React.createElement("p", { className: "gold text-lg" }, "Your guess was on the board. Nice!"), teamBadge, /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true }), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Next round coming up on the big screen."))
+        /* @__PURE__ */ React.createElement("div", { className: "phone-card" }, s.last ? /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, /* @__PURE__ */ React.createElement(LastResult, { s })) : /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, "Get ready!"), ((_n = s.sharp) == null ? void 0 : _n.includes(name)) && /* @__PURE__ */ React.createElement("p", { className: "gold text-lg" }, "Your guess was on the board. Nice!"), teamBadge, /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true }), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Next round coming up on the big screen."))
       );
     }
     if (s.phase === "final") {
       const st = standings(s);
-      const top = (_l = (_k = st[0]) == null ? void 0 : _k.score) != null ? _l : 0;
+      const top = (_p = (_o = st[0]) == null ? void 0 : _o.score) != null ? _p : 0;
       const won = st.some((x) => x.side === mySide && x.score === top);
       return frame(
         /* @__PURE__ */ React.createElement("div", { className: "phone-card" }, won && /* @__PURE__ */ React.createElement(Confetti, null), /* @__PURE__ */ React.createElement("p", { className: "eyebrow" }, "Final scores"), /* @__PURE__ */ React.createElement("h2", { className: "display text-4xl" }, won ? "You won! Mazel tov!" : `${st.filter((x) => x.score === top).map((x) => x.name).join(" & ")} won!`), /* @__PURE__ */ React.createElement(ScoreTable, { st, inline: true }), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Chag sameach!"))
       );
     }
     return frame(/* @__PURE__ */ React.createElement("div", { className: "phone-card" }, /* @__PURE__ */ React.createElement("p", null, "Watch the big screen.")));
+  }
+  function AnswerBox({ s, rec, send, label }) {
+    var _a;
+    const t = s.turn;
+    const [text, setText] = useState("");
+    if (!t) return null;
+    if (((_a = rec.answer) == null ? void 0 : _a.id) === t.id) return /* @__PURE__ */ React.createElement("p", { className: "sent-note" }, "Sent \u201C", rec.answer.text, "\u201D. Watch the big screen!");
+    return /* @__PURE__ */ React.createElement("form", { className: "guess-form", onSubmit: (e) => {
+      e.preventDefault();
+      const v = clean(text, 40);
+      if (v) send({ answer: { id: t.id, text: v, at: Date.now() } });
+    } }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, label), /* @__PURE__ */ React.createElement("input", { id: "answer-box", className: "input big-input", value: text, maxLength: 40, onChange: (e) => setText(e.target.value), placeholder: "Type your answer", autoComplete: "off" })), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-gold btn-big w-full", disabled: !clean(text) }, "Send answer"));
   }
   function SurveyCard({ s, rec, send, hostNow }) {
     var _a, _b, _c, _d, _e, _f;
@@ -2097,7 +2184,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     };
     return /* @__PURE__ */ React.createElement("form", { className: "phone-card", onSubmit: submit }, /* @__PURE__ */ React.createElement("p", { className: "eyebrow" }, "Family survey"), /* @__PURE__ */ React.createElement("p", { className: "phone-q big" }, s.question), !((_e = s.survey) == null ? void 0 : _e.empty) && /* @__PURE__ */ React.createElement(Countdown, { endsAt: s.survey.endsAt, now: hostNow, total: s.survey.total || SURVEY_MS }), ((_f = s.survey) == null ? void 0 : _f.empty) ? /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "The host is giving everyone a little more time.") : null, /* @__PURE__ */ React.createElement("input", { id: "survey-answer", className: "input big-input", value: text, maxLength: 32, onChange: (e) => setText(e.target.value), placeholder: "Your answer", disabled: timeUp, autoComplete: "off" }), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-gold btn-big w-full", disabled: timeUp || !clean(text) }, mine && clean(text) === mine ? "Sent \u2713" : mine ? "Change my answer" : "Send answer"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, timeUp ? "Time's up! Look at the big screen." : "One short answer. Keep it secret!"));
   }
-  function WatchCard({ s, rec, send, title, sub, hot }) {
+  function WatchCard({ s, rec, send, title, sub, hot, answer }) {
     var _a;
     if (s.openQ) {
       return /* @__PURE__ */ React.createElement("div", { className: "phone-card" + (hot ? " hot" : "") }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, title), /* @__PURE__ */ React.createElement("p", { className: "muted" }, sub), /* @__PURE__ */ React.createElement("p", { className: "phone-q big" }, s.question), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Quiet in the audience! Let them answer."));
@@ -2110,7 +2197,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       if (!t) return;
       send({ guess: { id: s.roundKey, text: t } });
     };
-    return /* @__PURE__ */ React.createElement("div", { className: "phone-card" + (hot ? " hot" : "") }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, title), /* @__PURE__ */ React.createElement("p", { className: "muted" }, sub), /* @__PURE__ */ React.createElement("p", { className: "phone-q" }, s.question), /* @__PURE__ */ React.createElement("form", { onSubmit: submit, className: "guess-form" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Your secret guess for the board"), /* @__PURE__ */ React.createElement("input", { id: "watch-guess", className: "input", value: text, maxLength: 32, onChange: (e) => setText(e.target.value), placeholder: "Type one short guess", autoComplete: "off" })), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-blue w-full", disabled: !clean(text) || clean(text) === mine }, mine ? clean(text) === mine ? "Guess saved \u2713" : "Change guess" : "Save guess")), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "If it shows up on the board, you'll get a shout-out after the round."));
+    return /* @__PURE__ */ React.createElement("div", { className: "phone-card" + (hot ? " hot" : "") }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, title), /* @__PURE__ */ React.createElement("p", { className: "muted" }, sub), /* @__PURE__ */ React.createElement("p", { className: "phone-q" }, s.question), s.typed && /* @__PURE__ */ React.createElement("p", { className: "typed small " + s.typed.verdict }, s.typed.name, ": \u201C", s.typed.text, "\u201D ", s.typed.verdict === "hit" ? "\u2713" : s.typed.verdict === "dup" ? "(already up)" : "\u2715"), answer ? answer : /* @__PURE__ */ React.createElement("form", { onSubmit: submit, className: "guess-form" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Your secret guess for the board"), /* @__PURE__ */ React.createElement("input", { id: "watch-guess", className: "input", value: text, maxLength: 32, onChange: (e) => setText(e.target.value), placeholder: "Type one short guess", autoComplete: "off" })), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-blue w-full", disabled: !clean(text) || clean(text) === mine }, mine ? clean(text) === mine ? "Guess saved \u2713" : "Change guess" : "Save guess")), !answer && /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "If it shows up on the board, you'll get a shout-out after the round."));
   }
   function App() {
     const caps = useCapabilities();

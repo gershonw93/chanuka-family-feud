@@ -91,3 +91,28 @@ export function buildSurveyBoard(texts, max = 7) {
     return { t: best.charAt(0).toUpperCase() + best.slice(1), p: g.count * 10, n: g.count, r: false };
   });
 }
+
+// How well a typed answer matches a board answer: 3 same answer, 2 one contains the other,
+// 1 they share a meaningful word, 0 no match.
+const KEYSTOP = new Set([...STOP, "with", "for", "on", "in", "at", "it", "is", "your", "you", "they", "them", "that", "this", "too", "very", "all", "out", "up", "get", "who", "what", "when", "something", "thing", "stuff", "people", "everyone", "someone"]);
+export function matchScore(guess, answer) {
+  const g = norm(guess), a = norm(answer);
+  if (!g || !a) return 0;
+  if (similar(g, a)) return 3;
+  if (a.length >= 4 && ` ${g} `.includes(` ${a} `)) return 2;
+  if (g.length >= 4 && ` ${a} `.includes(` ${g} `)) return 2;
+  const words = (s) => s.split(" ").filter((w) => w.length >= 4 && !KEYSTOP.has(w));
+  const aw = words(a);
+  for (const w of words(g)) if (aw.some((x) => similar(w, x))) return 1;
+  return 0;
+}
+
+// Index of the best-matching card for a typed answer, or -1.
+export function bestCard(board, guess) {
+  let best = -1, score = 0;
+  board.forEach((c, i) => {
+    const sc = matchScore(guess, c.t);
+    if (sc > score) { score = sc; best = i; }
+  });
+  return best;
+}
