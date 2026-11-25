@@ -244,12 +244,29 @@ function syncAutoOpen(d) {
 
 const membersOf = (s, side) => (s.settings.mode === "teams" ? activeIds(s).filter((p) => teamOf(s, p) === side) : [side]);
 
+// The one player who types the steal answer: the stealing side's face-off player.
+function stealCaptain(d) {
+  if (!d.stealSide) return null;
+  if (d.settings.mode !== "teams") return d.stealSide;
+  const f = d.face || {};
+  const fromFace = [f.p1, f.p2].find((p) => p && !d.kicked?.[p] && teamOf(d, p) === d.stealSide);
+  return fromFace || membersOf(d, d.stealSide)[0] || null;
+}
+
+// Typed answers wait for the host when the host's phone remote is connected (or the host chose that).
+const reviewOn = (s) => (s.settings.judgeMode ? s.settings.judgeMode === "host" : Object.keys(s.remotes || {}).length > 0);
+
+// The host acted on a typed answer that was waiting: record the outcome.
+function resolvePending(d, verdict) {
+  if (d.typed && d.typed.verdict === "pending") d.typed = { ...d.typed, verdict, k: rid() };
+}
+
 // Who may type an answer right now. A new id whenever a new answer is expected.
 function syncTurn(d) {
   let pids = [];
   if (d.phase === "faceoff" && d.face && (d.face.stage === "answer1" || d.face.stage === "answer2") && d.face.answering) pids = [d.face.answering];
   else if (d.phase === "round" && d.control) pids = membersOf(d, d.control);
-  else if (d.phase === "steal" && d.stealSide) pids = membersOf(d, d.stealSide);
+  else if (d.phase === "steal" && d.stealSide) { const c = stealCaptain(d); pids = c ? [c] : []; }
   if (!pids.length) { d.turn = null; return; }
   const sig = [d.roundKey, d.phase, d.face?.stage, d.face?.answering, d.control, d.stealSide, d.strikes, d.board.filter((c) => c.r).length, pids.join(",")].join("|");
   if (!d.turn || d.turn.sig !== sig) d.turn = { id: rid(), sig, pids };
@@ -269,7 +286,6 @@ function allRevealed(s) { return s.board.length > 0 && s.board.every((c) => c.r)
 function endRound(s, side, how, players) {
   if (side) s.scores[side] = (s.scores[side] || 0) + s.bank;
   s.last = { side: side || null, pts: side ? s.bank : 0, how };
-  s.board.forEach((c) => { if (!c.r) { c.r = true; c.late = true; } });
   s.phase = "roundEnd";
   s.buzz = s.buzz ? { ...s.buzz, open: false } : null;
   // Phones that guessed an answer on the board during the round
@@ -894,6 +910,7 @@ function Host({ db, room, code, initial, onExit }) {
   });
 
   const faceAnswerD = (d, idx) => {
+    resolvePending(d, idx >= 0 && d.board[idx] && !d.board[idx].r ? "hit" : "miss");
     const f = d.face;
     const pid = f.answering;
     let pts = 0;
@@ -974,6 +991,11 @@ function Host({ db, room, code, initial, onExit }) {
     if (!d.turn || d.turn.id !== turnId || d.openQ) return;
     const idx = bestCard(d.board, text);
     const dup = idx >= 0 && d.board[idx].r;
+    if (reviewOn(d)) {
+      // Wait for the host: show the answer and the app's suggestion, change nothing yet.
+      d.typed = { name: nameOf(d, pid), text: clean(text, 40), verdict: "pending", suggest: dup ? -1 : idx, dupOf: dup ? idx : -1, k: rid() };
+      return;
+    }
     d.typed = { name: nameOf(d, pid), text: clean(text, 40), verdict: idx < 0 ? "miss" : dup ? "dup" : "hit", k: rid() };
     if (d.phase === "faceoff") faceAnswerD(d, dup ? -1 : idx);
     else if (d.phase === "round") { if (idx >= 0 && !dup) roundRevealD(d, idx); else roundStrikeD(d); }
@@ -984,6 +1006,7 @@ function Host({ db, room, code, initial, onExit }) {
 
   const roundRevealD = (d, idx) => {
     if (!d.board[idx] || d.board[idx].r) return;
+    resolvePending(d, "hit");
     d.board[idx].r = true;
     d.bank += d.board[idx].p;
     d.fx = fx("flip");
@@ -992,6 +1015,7 @@ function Host({ db, room, code, initial, onExit }) {
   const roundReveal = (idx) => commit((d) => roundRevealD(d, idx));
 
   const roundStrikeD = (d) => {
+    resolvePending(d, "miss");
     d.strikes += 1;
     d.fx = fx("strike", { n: d.strikes });
     if (d.strikes >= 3) {
@@ -1009,6 +1033,7 @@ function Host({ db, room, code, initial, onExit }) {
   });
 
   const stealAnswerD = (d, idx) => {
+    resolvePending(d, idx >= 0 && d.board[idx] && !d.board[idx].r ? "hit" : "miss");
     if (idx >= 0 && d.board[idx] && !d.board[idx].r) {
       d.board[idx].r = true;
       d.bank += d.board[idx].p;
@@ -1019,6 +1044,39 @@ function Host({ db, room, code, initial, onExit }) {
     }
   };
   const stealAnswer = (idx) => commit((d) => stealAnswerD(d, idx));
+
+  // Play a card for whatever answer is expected right now.
+  const playCardD = (d, idx) => {
+    if (d.phase === "faceoff" && d.face && (d.face.stage === "answer1" || d.face.stage === "answer2") && !d.openQ) faceAnswerD(d, idx);
+    else if (d.phase === "round") { if (idx >= 0) roundRevealD(d, idx); else roundStrikeD(d); }
+    else if (d.phase === "steal") stealAnswerD(d, idx);
+  };
+  const acceptPending = () => commit((d) => {
+    const t = d.typed;
+    if (!t || t.verdict !== "pending" || !(t.suggest >= 0)) return;
+    playCardD(d, t.suggest);
+  });
+
+  // After a round: flip the answers nobody found, one at a time.
+  const revealLate = (i) => commit((d) => {
+    if ((d.phase !== "roundEnd" && d.phase !== "pick") || !d.board[i] || d.board[i].r) return;
+    d.board[i].r = true;
+    d.board[i].late = true;
+    d.fx = fx("flip");
+  }, { noUndo: true });
+  const revealTimer = useRef(null);
+  const revealRest = () => {
+    clearInterval(revealTimer.current);
+    const step = () => {
+      const st = sRef.current;
+      const i = st.board.findIndex((c) => !c.r);
+      if (st.phase !== "roundEnd" || i < 0) { clearInterval(revealTimer.current); return; }
+      revealLate(i);
+    };
+    step();
+    revealTimer.current = setInterval(step, 1300);
+  };
+  useEffect(() => () => clearInterval(revealTimer.current), []);
 
   const finishSurvey = (force) => commit((d) => {
     if (d.phase !== "survey" || !d.survey || (d.survey.done && !force)) return;
@@ -1105,6 +1163,7 @@ function Host({ db, room, code, initial, onExit }) {
     setSurveySec: (n) => commit((d) => { d.settings.surveySec = n; }, { noUndo: true }),
     setOpenPts: (n) => commit((d) => { d.settings.openPts = n; }, { noUndo: true }),
     setBuzzMode: (v) => commit((d) => { d.settings.buzzMode = v; }, { noUndo: true }),
+    setJudgeMode: (v) => commit((d) => { d.settings.judgeMode = v; }, { noUndo: true }),
     movePlayer: (pid) => commit((d) => { d.assign[pid] = teamOf(d, pid) === "A" ? "B" : "A"; }),
     kick: (pid) => commit((d) => { d.kicked[pid] = playersRef.current[pid]?.v || Date.now(); }),
   };
@@ -1152,7 +1211,8 @@ function Host({ db, room, code, initial, onExit }) {
       case "tap": {
         const i = Number(c.arg);
         if (!st.board[i] || st.board[i].r) break;
-        if (answering && !st.openQ) faceAnswer(i);
+        if (st.phase === "roundEnd") revealLate(i);
+        else if (answering && !st.openQ) faceAnswer(i);
         else if (st.phase === "round") roundReveal(i);
         else if (st.phase === "steal") stealAnswer(i);
         break;
@@ -1166,6 +1226,9 @@ function Host({ db, room, code, initial, onExit }) {
       case "open": if (st.phase === "faceoff" && st.face?.stage === "ready" && st.face.p1 && st.face.p2) openBuzzers(); break;
       case "reset": if (st.phase === "faceoff") resetBuzzers(); break;
       case "override": overrideTyped(); break;
+      case "accept": acceptPending(); break;
+      case "reveal": revealLate(Number(c.arg)); break;
+      case "revealRest": revealRest(); break;
       case "pass": if (st.phase === "round") passControl(); break;
       case "nobody": if (st.phase === "faceoff" && st.openQ) nobodyGotIt(); break;
       case "start": if (st.phase === "lobby" && activeIds(st).length >= 2) startGame(); break;
@@ -1367,9 +1430,10 @@ function Host({ db, room, code, initial, onExit }) {
 
   const canTapBoard =
     (s.phase === "faceoff" && (s.face?.stage === "answer1" || s.face?.stage === "answer2")) ||
-    s.phase === "round" || s.phase === "steal";
+    s.phase === "round" || s.phase === "steal" || s.phase === "roundEnd";
   const onTapCard = (i) => {
-    if (s.phase === "faceoff") faceAnswer(i);
+    if (s.phase === "roundEnd") revealLate(i);
+    else if (s.phase === "faceoff") faceAnswer(i);
     else if (s.phase === "round") roundReveal(i);
     else if (s.phase === "steal") stealAnswer(i);
   };
@@ -1384,7 +1448,14 @@ function Host({ db, room, code, initial, onExit }) {
         {s.sharp?.length > 0 && <div className="sharp">Sharp guessers on the phones: {s.sharp.join(", ")}</div>}
       </div>
     ) : <div className="status-big">Get ready for round {s.roundNo + 1}!</div>;
-    controls = last && s.phase === "roundEnd" ? (
+    const hiddenLeft = s.phase === "roundEnd" ? s.board.filter((c) => !c.r).length : 0;
+    controls = hiddenLeft > 0 ? (
+      <div className="flex gap-3 flex-wrap items-center">
+        <span className="note">{hiddenLeft} {hiddenLeft === 1 ? "answer" : "answers"} nobody found. Tap a card to show it.</span>
+        <Btn big onClick={revealRest}>Reveal the rest</Btn>
+        <Btn kind="ghost" onClick={() => commit((d) => { d.board.forEach((c) => { if (!c.r) { c.r = true; c.late = true; } }); }, { noUndo: true })}>Skip</Btn>
+      </div>
+    ) : last && s.phase === "roundEnd" ? (
       <Btn big onClick={finishGame}>Crown the winner</Btn>
     ) : (
       <div className="pick-row">
@@ -1564,9 +1635,15 @@ function Host({ db, room, code, initial, onExit }) {
               <Board board={s.board} onTap={onTapCard} canTap={canTapBoard} host peek={peek} />
               {s.typed && (s.phase === "faceoff" || s.phase === "round" || s.phase === "steal" || s.phase === "roundEnd") && (
                 <div className={"typed " + s.typed.verdict} key={s.typed.k}>
-                  {s.typed.name} typed “{s.typed.text}”
-                  <b>{s.typed.verdict === "hit" ? " ✓ On the board!" : s.typed.verdict === "dup" ? " Already up there!" : s.typed.verdict === "override" ? " Host is deciding…" : " ✕ Not on the board"}</b>
-                  {canOverride && <button type="button" className="chip override" onClick={overrideTyped}>Override</button>}
+                  {s.typed.name} {s.typed.verdict === "pending" ? "answered" : "typed"} “{s.typed.text}”
+                  <b>{s.typed.verdict === "pending" ? <span className="pulse"> … checking</span> : s.typed.verdict === "hit" ? " ✓ On the board!" : s.typed.verdict === "dup" ? " Already up there!" : s.typed.verdict === "override" ? " Host is deciding…" : " ✕ Not on the board"}</b>
+                  {s.typed.verdict === "pending" && (
+                    <span className="pending-btns">
+                      {s.typed.suggest >= 0 && <button type="button" className="chip override" onClick={acceptPending}>✓ Accept card {s.typed.suggest + 1}</button>}
+                      <button type="button" className="chip" onClick={() => commit((d) => playCardD(d, -1))}>✕ Not on the board</button>
+                    </span>
+                  )}
+                  {canOverride && s.typed.verdict !== "pending" && <button type="button" className="chip override" onClick={overrideTyped}>Override</button>}
                   {s.typed.verdict === "override" && <span className="override-help">Tap the right card, or give a strike.</span>}
                 </div>
               )}
@@ -1929,6 +2006,14 @@ function HostTools({ s, act, live, library, saveLibrary, libErr, pin, code, onCl
             </div>
           </div>
           <div className="tool-row">
+            <span className="tool-label">Typed answers</span>
+            <div className="seg">
+              <button type="button" className={!s.settings.judgeMode ? "on" : ""} onClick={() => act.setJudgeMode(null)}>I check them when my remote is connected</button>
+              <button type="button" className={s.settings.judgeMode === "host" ? "on" : ""} onClick={() => act.setJudgeMode("host")}>Always let me check</button>
+              <button type="button" className={s.settings.judgeMode === "auto" ? "on" : ""} onClick={() => act.setJudgeMode("auto")}>Always check automatically</button>
+            </div>
+          </div>
+          <div className="tool-row">
             <span className="tool-label">Survey time</span>
             <div className="seg">
               {[15, 30, 45, 60].map((n) => (
@@ -2212,9 +2297,12 @@ function Phone({ db, room, code, name, onLeave }) {
     const title = s.phase === "steal"
       ? (mine ? "Your side can steal!" : `${sideName(s, s.stealSide)} is trying to steal`)
       : (mine ? "Your side is guessing!" : `${sideName(s, s.control)} is guessing`);
+    const captain = s.phase === "steal" ? s.turn?.pids?.[0] : null;
     const answer = s.turn?.pids?.includes(pid)
-      ? <AnswerBox key={s.turn.id} s={s} rec={rec} send={send} label={s.phase === "steal" ? "One answer to steal. Agree as a team, then type it" : "Type your team's next answer"} />
-      : null;
+      ? <AnswerBox key={s.turn.id} s={s} rec={rec} send={send} label={s.phase === "steal" ? "You answer for your team! Huddle up, agree, then type it" : "Type your team's next answer"} />
+      : s.phase === "steal" && mine && captain
+        ? <p className="sent-note">Huddle up! Help {nameOf(s, captain)} pick the answer. {nameOf(s, captain)} types it for the team.</p>
+        : null;
     return frame(<WatchCard key={s.roundKey} s={s} mySide={mySide} title={title} hot={mine} answer={answer} />);
   }
 
@@ -2324,7 +2412,8 @@ function Remote({ db, code, pin, onLeave }) {
 
   const f = s.face;
   const answering = s.phase === "faceoff" && f && (f.stage === "answer1" || f.stage === "answer2");
-  const canTap = (answering && !s.openQ) || s.phase === "round" || s.phase === "steal";
+  const canTap = (answering && !s.openQ) || s.phase === "round" || s.phase === "steal" || s.phase === "roundEnd";
+  const hiddenLeft = s.phase === "roundEnd" ? s.board.filter((c) => !c.r).length : 0;
   const st = standings(s);
   const typedRec = answering ? players[f.answering] : null;
   const typedNow = typedRec && typedRec.answer?.id === s.turn?.id ? clean(typedRec.answer.text, 40) : "";
@@ -2342,7 +2431,11 @@ function Remote({ db, code, pin, onLeave }) {
     main = (
       <>
         {s.last && <p className="remote-status"><LastResult s={s} /></p>}
-        {last ? <Btn big onClick={() => cmd("finish")}>Crown the winner</Btn> : (
+        {hiddenLeft > 0 && <>
+          <p className="text-center">{hiddenLeft} {hiddenLeft === 1 ? "answer" : "answers"} nobody found. Tap one in the key to show it, or:</p>
+          <Btn big onClick={() => cmd("revealRest")}>Reveal the rest, one by one</Btn>
+        </>}
+        {hiddenLeft > 0 ? null : last ? <Btn big onClick={() => cmd("finish")}>Crown the winner</Btn> : (
           <>
             <p className="setting-label">Round {s.roundNo + 1}</p>
             <Btn big onClick={() => cmd("next", "mine")}>My next question</Btn>
@@ -2416,16 +2509,28 @@ function Remote({ db, code, pin, onLeave }) {
   return shell(
     <>
       {s.question && s.phase !== "pick" && s.phase !== "lobby" && <p className="remote-q">{s.question}</p>}
-      {s.typed && ["faceoff", "round", "steal", "roundEnd"].includes(s.phase) && (
-        <div className={"typed small " + s.typed.verdict}>
-          {s.typed.name}: “{s.typed.text}” {s.typed.verdict === "hit" ? "✓ matched" : s.typed.verdict === "dup" ? "already up" : s.typed.verdict === "override" ? "you're deciding" : "✕ no match"}
-          {s.typed.verdict !== "override" && <button type="button" className="chip override" onClick={() => cmd("override")}>Override</button>}
+      {s.typed && s.typed.verdict === "pending" && ["faceoff", "round", "steal"].includes(s.phase) && (
+        <div className="review">
+          <p className="review-title"><b>{s.typed.name}</b> answered</p>
+          <p className="review-text">“{s.typed.text}”</p>
+          <p className="muted text-sm">
+            {s.typed.suggest >= 0 ? <>Looks like <b>#{s.typed.suggest + 1} {s.board[s.typed.suggest]?.t}</b></> : s.typed.dupOf >= 0 ? <>Already on the board (#{s.typed.dupOf + 1})</> : "No matching answer found"}
+          </p>
+          {s.typed.suggest >= 0 && <Btn big onClick={() => cmd("accept")}>✓ Accept: {s.board[s.typed.suggest]?.t}</Btn>}
+          <Btn kind="red" big onClick={() => cmd("strike")}>✕ Not on the board</Btn>
+          <p className="muted text-sm">Or tap the right answer in the key below.</p>
         </div>
       )}
-      <div className="remote-actions">{main}</div>
+      {s.typed && s.typed.verdict !== "pending" && ["faceoff", "round", "steal", "roundEnd"].includes(s.phase) && (
+        <div className={"typed small " + s.typed.verdict}>
+          {s.typed.name}: “{s.typed.text}” {s.typed.verdict === "hit" ? "✓ matched" : s.typed.verdict === "dup" ? "already up" : s.typed.verdict === "override" ? "you're deciding" : "✕ no match"}
+          {s.typed.verdict !== "override" && s.phase !== "roundEnd" && <button type="button" className="chip override" onClick={() => cmd("override")}>Override</button>}
+        </div>
+      )}
+      <div className="remote-actions">{s.typed?.verdict === "pending" && ["faceoff", "round", "steal"].includes(s.phase) ? null : main}</div>
       {s.board.length > 0 && s.phase !== "pick" && (
         <div className="answer-key">
-          <p className="setting-label">Answer key{canTap ? " · tap to flip" : ""}</p>
+          <p className="setting-label">Answer key{canTap ? (s.phase === "roundEnd" ? " · tap to show on TV" : " · tap to flip") : ""}</p>
           {s.board.map((c, i) => (
             <button key={i} type="button" className={"key-row" + (c.r ? " done" : "")} disabled={!canTap || c.r} onClick={() => cmd("tap", i)}>
               <span className="key-n">{i + 1}</span><span className="key-t">{c.t}</span><b>{c.p}</b>
@@ -2496,7 +2601,7 @@ function WatchCard({ s, title, hot, answer, mySide }) {
     <div className={"phone-card" + (hot ? " hot" : "")}>
       <h2 className="display text-3xl">{title}</h2>
       <p className="phone-q">{s.question}</p>
-      {s.typed && <p className={"typed small " + s.typed.verdict}>{s.typed.name}: “{s.typed.text}” {s.typed.verdict === "hit" ? "✓ on the board" : s.typed.verdict === "dup" ? "(already up)" : s.typed.verdict === "override" ? "(host is deciding)" : "✕ not on the board"}</p>}
+      {s.typed && <p className={"typed small " + s.typed.verdict}>{s.typed.name}: “{s.typed.text}” {s.typed.verdict === "pending" ? "(host is checking…)" : s.typed.verdict === "hit" ? "✓ on the board" : s.typed.verdict === "dup" ? "(already up)" : s.typed.verdict === "override" ? "(host is deciding)" : "✕ not on the board"}</p>}
       {answer}
       <div className="stakes">
         {showStrikes && (

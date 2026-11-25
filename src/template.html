@@ -243,6 +243,14 @@ a.chip { text-decoration: none; display: inline-block; }
 .mini-scores { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; font-weight: 600; color: var(--muted); }
 .mini-scores .me { color: var(--white); }
 .setup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.typed.pending b { color: var(--gold); }
+.typed.small.pending { color: var(--gold); }
+.pending-btns { display: inline-flex; gap: 6px; margin-left: .6em; vertical-align: middle; flex-wrap: wrap; }
+.pending-btns .chip { font-size: 1rem; }
+.review { display: flex; flex-direction: column; gap: 8px; text-align: center; background: rgba(245,197,66,.12); border: 2px solid var(--gold); border-radius: 18px; padding: 14px; animation: pop .35s cubic-bezier(.3,1.6,.5,1) both; }
+.review-title { font-size: 1.1rem; }
+.review-text { font-family: var(--display); font-size: 2rem; color: var(--gold); overflow-wrap: anywhere; }
+.review .btn { width: 100%; }
 .sent-note { font-weight: 700; font-size: 1.2rem; }
 .stage.open { justify-content: center; gap: clamp(16px, 3vh, 36px); }
 .stage.open .question { font-size: clamp(2.2rem, 4.6vw, 5rem); }
