@@ -1,6 +1,7 @@
 import { QUESTIONS } from "./questions.js";
 import { rid, makeCode, clean, guessMatches, buildSurveyBoard, bestCard } from "./logic.js";
 import { makeSupabaseDb } from "./supabase-db.js";
+import { Sound } from "./sound.js";
 
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
@@ -28,44 +29,6 @@ function myPid() {
 /* Sound: tiny synth, no files                                         */
 /* ------------------------------------------------------------------ */
 
-const Sound = {
-  ctx: null,
-  on: local.get("lf-sound") !== "off",
-  ensure() {
-    try {
-      if (!this.ctx) {
-        const C = window.AudioContext || window.webkitAudioContext;
-        if (C) this.ctx = new C();
-      }
-      if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
-    } catch (e) {}
-    return this.ctx;
-  },
-  tone(freq, dur, type = "sine", vol = 0.25, when = 0, to) {
-    if (!this.on) return;
-    const c = this.ensure();
-    if (!c) return;
-    const t = c.currentTime + when;
-    const o = c.createOscillator();
-    const g = c.createGain();
-    o.type = type;
-    o.frequency.setValueAtTime(freq, t);
-    if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g).connect(c.destination);
-    o.start(t);
-    o.stop(t + dur + 0.05);
-  },
-  ding() { this.tone(988, 0.9, "triangle", 0.4); this.tone(1480, 1.1, "sine", 0.25, 0.09); this.tone(1976, 0.7, "sine", 0.12, 0.18); },
-  flip() { this.tone(523, 0.12, "square", 0.1); this.tone(784, 0.18, "triangle", 0.22, 0.07); this.tone(1047, 0.35, "triangle", 0.2, 0.14); },
-  strike() { this.tone(150, 0.7, "sawtooth", 0.28, 0, 110); this.tone(155, 0.7, "square", 0.12, 0, 112); },
-  win() { [523, 659, 784, 1047, 784, 1047].forEach((f, i) => this.tone(f, 0.3, "triangle", 0.25, i * 0.11)); },
-  fanfare() { [392, 523, 659, 784, 659, 784, 1047].forEach((f, i) => this.tone(f, i === 6 ? 1.2 : 0.28, "triangle", 0.28, i * 0.16)); },
-  tick() { this.tone(1200, 0.05, "square", 0.05); },
-  buzz() { this.tone(330, 0.25, "square", 0.2, 0, 440); },
-};
 
 /* ------------------------------------------------------------------ */
 /* Game model (the host screen owns and writes this document)          */
@@ -525,12 +488,32 @@ function Board({ board, onTap, canTap, host, peek }) {
   );
 }
 
+// The big red X: a thick cross with a white rim and a dark edge.
+const X_PATH = "M50 34 L74 10 Q78 6 82 10 L90 18 Q94 22 90 26 L66 50 L90 74 Q94 78 90 82 L82 90 Q78 94 74 90 L50 66 L26 90 Q22 94 18 90 L10 82 Q6 78 10 74 L34 50 L10 26 Q6 22 10 18 L18 10 Q22 6 26 10 Z";
+function XMark({ off, className = "" }) {
+  return (
+    <svg className={"xmark" + (off ? " off" : "") + (className ? " " + className : "")} viewBox="0 0 100 100" aria-hidden="true">
+      {!off && (
+        <defs>
+          <linearGradient id="lfxg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#ff7a7a" />
+            <stop offset="0.45" stopColor="#ee2b33" />
+            <stop offset="1" stopColor="#a80f17" />
+          </linearGradient>
+        </defs>
+      )}
+      <path d={X_PATH} className="x-edge" />
+      <path d={X_PATH} className="x-fill" />
+    </svg>
+  );
+}
+
 function StrikeOverlay({ n, k }) {
   if (!n) return null;
   return (
     <div className="strike-overlay" key={k} aria-live="assertive" aria-label={`Strike ${n}`}>
       {Array.from({ length: n }).map((_, i) => (
-        <span key={i} className="strike-x" style={{ animationDelay: `${i * 0.06}s` }}>✕</span>
+        <span key={i} className="strike-x" style={{ animationDelay: `${i * 0.07}s` }}><XMark /></span>
       ))}
     </div>
   );
@@ -539,7 +522,7 @@ function StrikeOverlay({ n, k }) {
 function Strikes({ n }) {
   return (
     <div className="strikes" aria-label={`${n} strikes`}>
-      {[0, 1, 2].map((i) => <span key={i} className={"strike-dot" + (i < n ? " on" : "")}>✕</span>)}
+      {[0, 1, 2].map((i) => <span key={i} className={"strike-dot" + (i < n ? " on" : "")}><XMark off={i >= n} /></span>)}
     </div>
   );
 }
@@ -1170,7 +1153,7 @@ function Host({ db, room, code, initial, onExit }) {
 
   const finishGame = () => commit((d) => {
     d.phase = "final";
-    d.fx = fx("fanfare");
+    d.fx = fx("finale");
     d.board.forEach((c) => { c.r = true; });
   });
 
@@ -2606,7 +2589,7 @@ function WatchCard({ s, title, hot, answer, mySide }) {
       <div className="stakes">
         {showStrikes && (
           <div className="phone-strikes" aria-label={`${s.strikes} of 3 strikes`}>
-            {[0, 1, 2].map((i) => <span key={i} className={"pstrike" + (i < s.strikes ? " on" : "")}>✕</span>)}
+            {[0, 1, 2].map((i) => <span key={i} className={"pstrike" + (i < s.strikes ? " on" : "")}><XMark off={i >= s.strikes} /></span>)}
           </div>
         )}
         <p className="stakes-line">{situation(s, mySide)}</p>
