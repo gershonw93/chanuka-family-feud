@@ -177,6 +177,9 @@ function pickQuestion(s) {
   return idx;
 }
 
+const WEB = typeof window !== "undefined" && !!window.LF_BACKEND;
+const SITE = "latke-feud.vercel.app";
+
 const AUTO_PTS = [32, 24, 16, 11, 8, 5, 4];
 
 // kind: "builtin" | "survey" | "custom" | "mine". opts: { text, idx, item, mode, replace }
@@ -613,7 +616,7 @@ function ErrorScreen({ title, children }) {
 /* Landing                                                             */
 /* ------------------------------------------------------------------ */
 
-function Landing({ db, onHost, onResume, onJoin }) {
+function Landing({ db, onHost, onResume, onJoin, onPrep }) {
   const hashCode = (location.hash || "").replace("#", "").toUpperCase();
   const [code, setCode] = useState(/^[A-Z]{4}$/.test(hashCode) ? hashCode : local.get("lf-last-code") || "");
   const [name, setName] = useState(local.get("lf-name") || "");
@@ -650,6 +653,11 @@ function Landing({ db, onHost, onResume, onJoin }) {
           <Menorah lit={8} size="lg" />
           <h1 className="display title">Latke Feud</h1>
           <p className="tagline">The family says… and the family is never wrong.</p>
+          {!WEB && (
+            <p className="site-note">
+              Party night: the TV and every phone should open <b>https://{SITE}</b>. Games hosted here on claude.ai can only be joined from this claude.ai link.
+            </p>
+          )}
         </div>
 
         <form className="panel join-panel" onSubmit={submit}>
@@ -681,6 +689,7 @@ function Landing({ db, onHost, onResume, onJoin }) {
           <p className="muted">Open this on the TV or laptop everyone can see. You'll get a room code for the phones.</p>
           <div className="flex flex-wrap gap-3">
             <Btn kind="blue" big onClick={onHost}>Host a new game</Btn>
+            <Btn kind="gold" onClick={onPrep}>Prepare questions</Btn>
             {resumeCode && <Btn kind="ghost" onClick={() => onResume(resumeCode)}>Resume game {resumeCode}</Btn>}
           </div>
         </div>
@@ -703,7 +712,8 @@ function Host({ db, room, code, initial, onExit }) {
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [peek, setPeek] = useState(local.get("lf-peek") === "on");
   const [toolsOpen, setToolsOpen] = useState(false);
-  const [library, saveLibrary, libErr] = useLibrary(db);
+  const setId = useMemo(getSetId, []);
+  const [library, saveLibrary, libErr] = useLibrary(db, setId);
   const docRef = useMemo(() => db.doc("rooms/" + code), [db, code]);
   const write = useWriter(docRef, setSyncErr);
   const fast = s.phase === "faceoff" && s.face?.stage === "open";
@@ -920,7 +930,22 @@ function Host({ db, room, code, initial, onExit }) {
     }
   });
   // A phone typed its answer: compare it with the hidden cards and play it.
-  const judgeTyped = (turnId, pid, text) => commit((d) => {
+  const typedUndo = useRef(null);
+  const judgeTyped = (turnId, pid, text) => {
+    const before = sRef.current;
+    judgeTypedCommit(turnId, pid, text);
+    const now = sRef.current;
+    if (now !== before && now.typed && now.typed.k !== before.typed?.k) typedUndo.current = { k: now.typed.k, len: undoStack.current.length };
+  };
+  const canOverride = !!(s.typed && typedUndo.current && typedUndo.current.k === s.typed.k && typedUndo.current.len === undoStack.current.length);
+  const overrideTyped = () => {
+    if (!canOverride) return;
+    const t = s.typed;
+    typedUndo.current = null;
+    undo();
+    commit((d) => { d.typed = { ...t, verdict: "override", k: rid() }; }, { noUndo: true });
+  };
+  const judgeTypedCommit = (turnId, pid, text) => commit((d) => {
     if (!d.turn || d.turn.id !== turnId || d.openQ) return;
     const idx = bestCard(d.board, text);
     const dup = idx >= 0 && d.board[idx].r;
@@ -1136,7 +1161,8 @@ function Host({ db, room, code, initial, onExit }) {
         {syncBanner}
         <main className="lobby">
           <section className="lobby-code">
-            <p className="eyebrow">Grab your phone and open this same link</p>
+            <p className="eyebrow">{WEB ? "Grab your phone and go to" : "Grab your phone and open this same claude.ai link"}</p>
+            {WEB && <p className="join-url">{SITE}</p>}
             <div className="big-code" aria-label={`Room code ${code.split("").join(" ")}`}>
               {code.split("").map((ch, i) => <span key={i} style={{ animationDelay: `${i * 0.12}s` }}>{ch}</span>)}
             </div>
@@ -1212,6 +1238,13 @@ function Host({ db, room, code, initial, onExit }) {
             ) : (
               <ul className="solo-list">{ids.map((p) => <PlayerChip key={p} pid={p} />)}</ul>
             )}
+            {library.length > 0 && (
+              <div className="prepared">
+                <span><b>{library.length}</b> prepared {library.length === 1 ? "question" : "questions"} ready</span>
+                {s.settings.rounds !== library.length && <button type="button" className="chip" onClick={() => commit((d) => { d.settings.rounds = Math.min(30, library.length); }, { noUndo: true })}>Play {library.length} {library.length === 1 ? "round" : "rounds"}</button>}
+                <button type="button" className="chip" onClick={() => setToolsOpen(true)}>Edit</button>
+              </div>
+            )}
             <div className="flex flex-wrap gap-3 items-center mt-auto pt-4">
               <Btn big onClick={startGame} disabled={ids.length < 2}>Start the game</Btn>
               {ids.length < 2 && <span className="muted">Waiting for at least 2 players</span>}
@@ -1257,11 +1290,11 @@ function Host({ db, room, code, initial, onExit }) {
     ) : (
       <div className="pick-row">
         <span className="pick-label">Round {s.roundNo + 1}:</span>
+        {library.length > 0 && <Btn big onClick={() => nextRound("mine")} disabled={!nextMine}>My next question{nextMine ? ` (${library.filter((it) => !(s.usedMine || []).includes(it.id)).length} left)` : "s all played"}</Btn>}
         <form className="custom-q" onSubmit={(e) => { e.preventDefault(); nextRound("open"); }}>
           <input id="custom-q" className="input" value={custom} maxLength={120} onChange={(e) => setCustom(e.target.value)} placeholder="Type a question to ask…" />
           <button type="submit" className="btn btn-gold" disabled={!clean(custom)}>Ask it</button>
         </form>
-        {library.length > 0 && <Btn big onClick={() => nextRound("mine")} disabled={!nextMine}>My next question{nextMine ? ` (${library.filter((it) => !(s.usedMine || []).includes(it.id)).length} left)` : "s all played"}</Btn>}
         <Btn kind="blue" onClick={() => nextRound("builtin")}>Ready-made board</Btn>
         <Btn kind="ghost" onClick={() => nextRound("survey")}>Family survey</Btn>
       </div>
@@ -1432,7 +1465,9 @@ function Host({ db, room, code, initial, onExit }) {
               {s.typed && (s.phase === "faceoff" || s.phase === "round" || s.phase === "steal" || s.phase === "roundEnd") && (
                 <div className={"typed " + s.typed.verdict} key={s.typed.k}>
                   {s.typed.name} typed “{s.typed.text}”
-                  <b>{s.typed.verdict === "hit" ? " ✓ On the board!" : s.typed.verdict === "dup" ? " Already up there!" : " ✕ Not on the board"}</b>
+                  <b>{s.typed.verdict === "hit" ? " ✓ On the board!" : s.typed.verdict === "dup" ? " Already up there!" : s.typed.verdict === "override" ? " Host is deciding…" : " ✕ Not on the board"}</b>
+                  {canOverride && <button type="button" className="chip override" onClick={overrideTyped}>Override</button>}
+                  {s.typed.verdict === "override" && <span className="override-help">Tap the right card, or give a strike.</span>}
                 </div>
               )}
               <div className="bank"><span>Round bank</span><b>{s.bank}</b></div>
@@ -1481,26 +1516,87 @@ function sanitizeItems(raw) {
   }));
 }
 
-function useLibrary(db) {
+// Each host keeps their prepared questions under a private set code saved on their device.
+function getSetId() {
+  let id = local.get("lf-set");
+  if (!id || !/^s[a-z0-9]{8,16}$/.test(id)) {
+    let r = "";
+    while (r.length < 12) r += rid();
+    id = "s" + r.slice(0, 12);
+    local.set("lf-set", id);
+  }
+  return id;
+}
+
+function useLibrary(db, setId) {
   const [items, setItems] = useState([]);
   const [err, setErr] = useState(null);
-  const ref = useMemo(() => db.doc("library/questions"), [db]);
+  const [loaded, setLoaded] = useState(false);
+  const ref = useMemo(() => db.doc("library/" + setId), [db, setId]);
   const write = useWriter(ref, setErr);
-  const dirty = useRef(false);
+  const lastSave = useRef(0);
   useEffect(() => {
+    setItems([]);
+    setLoaded(false);
     const unsub = ref.onSnapshot((sn) => {
-      if (dirty.current && sn.metadata?.hasPendingWrites) return;
-      if (sn.exists) setItems(sanitizeItems(sn.data()?.items));
+      if (Date.now() - lastSave.current < 5000) return; // don't let an older copy undo a fresh edit
+      setLoaded(true);
+      setItems(sn.exists ? sanitizeItems(sn.data()?.items) : []);
     }, () => {});
     return unsub;
   }, [ref]);
   const save = useCallback((next) => {
-    dirty.current = true;
+    lastSave.current = Date.now();
     const clean2 = sanitizeItems(next);
     setItems(clean2);
     write({ items: clean2 });
   }, [write]);
-  return [items, save, err];
+  return [items, save, err, loaded];
+}
+
+function Prep({ db, onBack, onHost }) {
+  const [setId, setSetId] = useState(getSetId);
+  const [library, save, err, loaded] = useLibrary(db, setId);
+  const [other, setOther] = useState("");
+  const [msg, setMsg] = useState("");
+  const switchSet = (e) => {
+    e.preventDefault();
+    const v = other.trim().toLowerCase();
+    if (!/^s[a-z0-9]{8,16}$/.test(v)) { setMsg("That doesn't look like a set code. It starts with s and has 9 to 17 letters and numbers."); return; }
+    local.set("lf-set", v);
+    setSetId(v);
+    setOther("");
+    setMsg("Loaded that question set.");
+  };
+  return (
+    <div className="screen prep">
+      <div className="prep-inner">
+        <div className="prep-head">
+          <h1 className="display">Prepare your game</h1>
+          <Btn kind="ghost" onClick={onBack}>Back</Btn>
+        </div>
+        <p className="prep-lead">Write your questions and answers before the party. Players never see this screen. During the game, tap <b>My next question</b> to play them in this order.</p>
+        <section className="panel">
+          <h2 className="display text-2xl text-[var(--gold)]">Your questions {loaded ? `(${library.length})` : ""}</h2>
+          <QuestionLibrary items={library} save={save} used={[]} err={err} />
+        </section>
+        <section className="panel">
+          <h2 className="display text-xl">Your private set code</h2>
+          <p>Your questions are saved under this code, and this device remembers it. To edit or host them from another device, type the code there.</p>
+          <p className="set-code">{setId}</p>
+          <form className="flex flex-wrap gap-2" onSubmit={switchSet}>
+            <input id="set-code" className="input flex-1 min-w-[12rem]" value={other} onChange={(e) => setOther(e.target.value)} placeholder="Use a set code from another device" autoComplete="off" />
+            <button type="submit" className="btn btn-ghost" disabled={!other.trim()}>Load</button>
+          </form>
+          {msg && <p className="flash">{msg}</p>}
+        </section>
+        <div className="flex flex-wrap gap-3">
+          <Btn big onClick={onHost}>Host a game{library.length ? ` with these ${library.length} questions` : ""}</Btn>
+          <Btn kind="ghost" onClick={onBack}>Back</Btn>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function HostTools({ s, act, live, library, saveLibrary, libErr, onClose }) {
@@ -1847,7 +1943,8 @@ function Phone({ db, room, code, name, onLeave }) {
 
   if (!s) {
     if (status === "missing") return frame(
-      <div className="phone-card"><h2 className="display text-3xl">No game called {code}</h2><p>Check the code on the TV and try again.</p><Btn onClick={onLeave}>Back</Btn></div>
+      <div className="phone-card"><h2 className="display text-3xl">No game called {code}</h2><p>Check the code on the TV and try again.</p>
+        <p className="muted">{WEB ? `The TV has to host the game on ${SITE} too.` : `The TV has to host the game on this same claude.ai link. For the party, everyone should use ${SITE}.`}</p><Btn onClick={onLeave}>Back</Btn></div>
     );
     return frame(<div className="phone-card"><p className="pulse text-xl">{status === "slow" ? "Still connecting to the game… check your connection." : "Connecting to the game…"}</p></div>);
   }
@@ -2049,7 +2146,7 @@ function WatchCard({ s, rec, send, title, sub, hot, answer }) {
       <h2 className="display text-3xl">{title}</h2>
       <p className="muted">{sub}</p>
       <p className="phone-q">{s.question}</p>
-      {s.typed && <p className={"typed small " + s.typed.verdict}>{s.typed.name}: “{s.typed.text}” {s.typed.verdict === "hit" ? "✓" : s.typed.verdict === "dup" ? "(already up)" : "✕"}</p>}
+      {s.typed && <p className={"typed small " + s.typed.verdict}>{s.typed.name}: “{s.typed.text}” {s.typed.verdict === "hit" ? "✓" : s.typed.verdict === "dup" ? "(already up)" : s.typed.verdict === "override" ? "(host is deciding)" : "✕"}</p>}
       {answer ? answer : <form onSubmit={submit} className="guess-form">
         <label className="field">
           <span>Your secret guess for the board</span>
@@ -2113,7 +2210,8 @@ function App() {
   if (busy) return <div className="screen center"><p className="pulse text-2xl">{busy}</p></div>;
   if (mode.kind === "host") return <Host db={db} room={room} code={mode.code} initial={mode.initial} onExit={() => { local.del("lf-host-code"); setMode({ kind: "landing" }); }} />;
   if (mode.kind === "phone") return <Phone db={db} room={room} code={mode.code} name={mode.name} onLeave={() => setMode({ kind: "landing" })} />;
-  return <Landing db={db} onHost={() => host(null)} onResume={(c) => host(c)} onJoin={(code, name) => setMode({ kind: "phone", code, name })} />;
+  if (mode.kind === "prep") return <Prep db={db} onBack={() => setMode({ kind: "landing" })} onHost={() => host(null)} />;
+  return <Landing db={db} onHost={() => host(null)} onResume={(c) => host(c)} onPrep={() => setMode({ kind: "prep" })} onJoin={(code, name) => setMode({ kind: "phone", code, name })} />;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
