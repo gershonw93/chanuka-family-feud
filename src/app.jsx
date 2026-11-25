@@ -669,6 +669,10 @@ function Landing({ db, onHost, onResume, onJoin, onPrep, onRemote }) {
           <Menorah lit={8} size="lg" />
           <h1 className="display title">Latke Feud</h1>
           <p className="tagline">The family says… and the family is never wrong.</p>
+          <div className="flex flex-wrap gap-2 justify-center mt-3">
+            <a className="chip" href="#join-panel" onClick={(e) => { e.preventDefault(); document.getElementById("join-code")?.focus(); }}>I'm a player</a>
+            <a className="chip chip-on" href="#remote" onClick={(e) => { e.preventDefault(); document.getElementById("remote")?.scrollIntoView({ behavior: "smooth" }); setTimeout(() => document.getElementById("remote-code")?.focus(), 400); }}>I'm the host: phone remote</a>
+          </div>
           {!WEB && (
             <p className="site-note">
               Party night: the TV and every phone should open <b>https://{SITE}</b>. Games hosted here on claude.ai can only be joined from this claude.ai link.
@@ -708,13 +712,15 @@ function Landing({ db, onHost, onResume, onJoin, onPrep, onRemote }) {
             <Btn kind="gold" onClick={onPrep}>Prepare questions</Btn>
             {resumeCode && <Btn kind="ghost" onClick={() => onResume(resumeCode)}>Resume game {resumeCode}</Btn>}
           </div>
-          <form className="remote-form" onSubmit={(e) => {
+        </div>
+          <form id="remote" className="panel remote-panel" onSubmit={(e) => {
             e.preventDefault();
             const c = rcode.trim().toUpperCase();
             if (!/^[A-Z]{4}$/.test(c) || !/^\d{4}$/.test(rpin.trim())) { setRerr("Type the 4-letter room code and the 4-digit PIN from Host tools on the TV."); return; }
             onRemote(c, rpin.trim());
           }}>
-            <span className="setting-label">Host remote: run the game from this phone</span>
+            <h2 className="display text-3xl text-[var(--gold)]">Host remote</h2>
+            <p className="muted">For the host only: see the answers and run the game from your phone. Get the PIN from ⚙ Host tools on the TV.</p>
             <div className="flex flex-wrap gap-2">
               <input id="remote-code" className="input remote-in" value={rcode} onChange={(e) => setRcode(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4))} placeholder="Code" autoComplete="off" aria-label="Room code" />
               <input id="remote-pin" className="input remote-in" value={rpin} inputMode="numeric" onChange={(e) => setRpin(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))} placeholder="PIN" autoComplete="off" aria-label="Host PIN" />
@@ -722,7 +728,6 @@ function Landing({ db, onHost, onResume, onJoin, onPrep, onRemote }) {
             </div>
             {rerr && <p className="err">{rerr}</p>}
           </form>
-        </div>
       </div>
     </div>
   );
