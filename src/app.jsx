@@ -636,21 +636,9 @@ function Landing({ db, onHost, onResume, onJoin, onPrep, onRemote }) {
   const hashCode = (location.hash || "").replace("#", "").toUpperCase();
   const [code, setCode] = useState(/^[A-Z]{4}$/.test(hashCode) ? hashCode : local.get("lf-last-code") || "");
   const [name, setName] = useState(local.get("lf-name") || "");
-  const [recent, setRecent] = useState([]);
   const [err, setErr] = useState("");
   const resumeCode = local.get("lf-host-code");
 
-  useEffect(() => {
-    let alive = true;
-    db.collection("rooms").where("createdAt", ">", Date.now() - 8 * 3600 * 1000).limit(20).get()
-      .then((qs) => {
-        if (!alive) return;
-        const list = qs.docs.map((d) => d.data()).filter((d) => d && /^[A-Z]{4}$/.test(d.code) && d.phase !== "final")
-          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 4);
-        setRecent(list);
-      }).catch(() => {});
-    return () => { alive = false; };
-  }, [db]);
 
   const submit = (e) => {
     e.preventDefault();
@@ -682,15 +670,6 @@ function Landing({ db, onHost, onResume, onJoin, onPrep, onRemote }) {
 
         <form className="panel join-panel" onSubmit={submit}>
           <h2 className="display text-3xl text-[var(--gold)]">Join on your phone</h2>
-          {recent.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {recent.map((r) => (
-                <button type="button" key={r.code} className={"chip" + (code === r.code ? " chip-on" : "")} onClick={() => setCode(r.code)}>
-                  Game {r.code}
-                </button>
-              ))}
-            </div>
-          )}
           <label className="field">
             <span>Room code</span>
             <input id="join-code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4))}
@@ -748,7 +727,7 @@ function Host({ db, room, code, initial, onExit }) {
   const [peek, setPeek] = useState(local.get("lf-peek") === "on");
   const [toolsOpen, setToolsOpen] = useState(false);
   const setId = useMemo(getSetId, []);
-  const [library, saveLibrary, libErr] = useLibrary(db, setId);
+  const [library, saveLibrary, libErr, libLoaded, setup] = useLibrary(db, setId);
   const docRef = useMemo(() => db.doc("rooms/" + code), [db, code]);
   const write = useWriter(docRef, setSyncErr);
   const fast = (s.phase === "faceoff" && s.face?.stage === "open") || Object.keys(s.remotes || {}).length > 0;
@@ -1146,6 +1125,18 @@ function Host({ db, room, code, initial, onExit }) {
   }, { noUndo: true });
 
   const kick = (pid) => commit((d) => { d.kicked[pid] = playersRef.current[pid]?.v || Date.now(); }, { noUndo: true });
+
+  // A new game starts with the host's prepared setup (team names, rounds, mode).
+  useEffect(() => {
+    const cur = sRef.current;
+    if (!libLoaded || cur.setupApplied || cur.phase !== "lobby" || cur.roundNo !== 0) return;
+    commit((d) => {
+      d.teamNames = { A: setup.teamA, B: setup.teamB };
+      d.settings.rounds = setup.rounds;
+      d.settings.mode = setup.mode;
+      d.setupApplied = true;
+    }, { noUndo: true });
+  }, [libLoaded, setup]);
 
   /* ---- host remote (the host's own phone) ---- */
   const pin = useMemo(() => {
@@ -1637,8 +1628,23 @@ function getSetId() {
   return id;
 }
 
+const defaultSetup = () => ({ teamA: TEAMS.A.name, teamB: TEAMS.B.name, rounds: 6, mode: "teams" });
+function cleanSetup(g) {
+  const d = defaultSetup();
+  if (!g || typeof g !== "object") return d;
+  return {
+    teamA: clean(g.teamA, 24) || d.teamA,
+    teamB: clean(g.teamB, 24) || d.teamB,
+    rounds: Math.max(1, Math.min(30, Math.round(Number(g.rounds) || d.rounds))),
+    mode: g.mode === "solo" ? "solo" : "teams",
+  };
+}
+
 function useLibrary(db, setId) {
   const [items, setItems] = useState([]);
+  const [setup, setSetup] = useState(defaultSetup);
+  const itemsRef = useRef([]);
+  const setupRef = useRef(defaultSetup());
   const [err, setErr] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const ref = useMemo(() => db.doc("library/" + setId), [db, setId]);
@@ -1650,22 +1656,35 @@ function useLibrary(db, setId) {
     const unsub = ref.onSnapshot((sn) => {
       if (Date.now() - lastSave.current < 5000) return; // don't let an older copy undo a fresh edit
       setLoaded(true);
-      setItems(sn.exists ? sanitizeItems(sn.data()?.items) : []);
+      const its = sn.exists ? sanitizeItems(sn.data()?.items) : [];
+      const g = cleanSetup(sn.exists ? sn.data()?.game : null);
+      itemsRef.current = its;
+      setupRef.current = g;
+      setItems(its);
+      setSetup(g);
     }, () => {});
     return unsub;
   }, [ref]);
   const save = useCallback((next) => {
     lastSave.current = Date.now();
     const clean2 = sanitizeItems(next);
+    itemsRef.current = clean2;
     setItems(clean2);
-    write({ items: clean2 });
+    write({ items: clean2, game: setupRef.current });
   }, [write]);
-  return [items, save, err, loaded];
+  const saveSetup = useCallback((patch) => {
+    lastSave.current = Date.now();
+    const g = { ...setupRef.current, ...patch };
+    setupRef.current = g;
+    setSetup(g);
+    write({ items: itemsRef.current, game: cleanSetup(g) });
+  }, [write]);
+  return [items, save, err, loaded, setup, saveSetup];
 }
 
 function Prep({ db, onBack, onHost }) {
   const [setId, setSetId] = useState(getSetId);
-  const [library, save, err, loaded] = useLibrary(db, setId);
+  const [library, save, err, loaded, setup, saveSetup] = useLibrary(db, setId);
   const [other, setOther] = useState("");
   const [msg, setMsg] = useState("");
   const switchSet = (e) => {
@@ -1684,7 +1703,39 @@ function Prep({ db, onBack, onHost }) {
           <h1 className="display">Prepare your game</h1>
           <Btn kind="ghost" onClick={onBack}>Back</Btn>
         </div>
-        <p className="prep-lead">Write your questions and answers before the party. Players never see this screen. During the game, tap <b>My next question</b> to play them in this order.</p>
+        <p className="prep-lead">Set up your game days ahead: team names, rounds, and your own questions and answers. Everything saves automatically and is still here when you come back. Players never see this screen. On party night, tap <b>Host a new game</b> on the same device, and during the game tap <b>My next question</b> to play your questions in order.</p>
+        <section className="panel">
+          <h2 className="display text-2xl text-[var(--gold)]">Game setup</h2>
+          <div className="setup-grid">
+            <label className="field">
+              <span>Team 1 name</span>
+              <input id="setup-team-a" className="input" value={setup.teamA} maxLength={24} onChange={(e) => saveSetup({ teamA: e.target.value })} />
+            </label>
+            <label className="field">
+              <span>Team 2 name</span>
+              <input id="setup-team-b" className="input" value={setup.teamB} maxLength={24} onChange={(e) => saveSetup({ teamB: e.target.value })} />
+            </label>
+          </div>
+          <div className="settings">
+            <div className="setting">
+              <span className="setting-label">Rounds</span>
+              <div className="stepper">
+                <button type="button" onClick={() => saveSetup({ rounds: Math.max(1, setup.rounds - 1) })} aria-label="Fewer rounds">−</button>
+                <b>{setup.rounds}</b>
+                <button type="button" onClick={() => saveSetup({ rounds: Math.min(30, setup.rounds + 1) })} aria-label="More rounds">+</button>
+              </div>
+              {library.length > 0 && setup.rounds !== library.length && <button type="button" className="chip" onClick={() => saveSetup({ rounds: Math.min(30, library.length) })}>Match my {library.length} questions</button>}
+            </div>
+            <div className="setting">
+              <span className="setting-label">Play as</span>
+              <div className="seg">
+                <button type="button" className={setup.mode === "teams" ? "on" : ""} onClick={() => saveSetup({ mode: "teams" })}>Two teams</button>
+                <button type="button" className={setup.mode === "solo" ? "on" : ""} onClick={() => saveSetup({ mode: "solo" })}>Everyone for themselves</button>
+              </div>
+            </div>
+          </div>
+          <p className="muted text-sm">Saved automatically. When you host from this device, the game starts with these settings.</p>
+        </section>
         <section className="panel">
           <h2 className="display text-2xl text-[var(--gold)]">Your questions {loaded ? `(${library.length})` : ""}</h2>
           <QuestionLibrary items={library} save={save} used={[]} err={err} />
