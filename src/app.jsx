@@ -1,5 +1,6 @@
 import { QUESTIONS } from "./questions.js";
 import { rid, makeCode, clean, guessMatches, buildSurveyBoard } from "./logic.js";
+import { makeSupabaseDb } from "./supabase-db.js";
 
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
@@ -242,6 +243,12 @@ function useCapabilities() {
   useEffect(() => {
     let alive = true;
     (async () => {
+      const web = window.LF_BACKEND;
+      if (web && web.url && web.key) {
+        await sleep(0);
+        if (alive) setSt({ loading: false, db: makeSupabaseDb(web.url, web.key), room: null });
+        return;
+      }
       for (let i = 0; i < 40 && !(window.claude && typeof window.claude.use === "function"); i++) await sleep(100);
       if (!(window.claude && typeof window.claude.use === "function")) {
         if (alive) setSt({ loading: false, db: null, room: null });

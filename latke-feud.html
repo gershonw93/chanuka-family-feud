@@ -338,6 +338,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
 <script>
+
 (() => {
   // src/questions.js
   var QUESTIONS = [
@@ -435,6 +436,120 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       const best = Object.values(g.spell).sort((x, y) => y.c - x.c)[0].t;
       return { t: best.charAt(0).toUpperCase() + best.slice(1), p: g.count * 10, n: g.count, r: false };
     });
+  }
+
+  // src/supabase-db.js
+  var err = (code, message) => ({ code, message });
+  function makeSupabaseDb(url, key) {
+    const base = url.replace(/\/$/, "") + "/rest/v1/kv";
+    const headers = { apikey: key, "Content-Type": "application/json" };
+    const enc = encodeURIComponent;
+    async function req(method, query, body, extra = {}) {
+      let r;
+      try {
+        r = await fetch(base + query, { method, headers: { ...headers, ...extra }, body: body ? JSON.stringify(body) : void 0, cache: "no-store" });
+      } catch (e) {
+        throw err("unavailable", String(e));
+      }
+      if (r.status === 429) throw err("resource_exhausted", "Too many requests");
+      if (r.status >= 500) throw err("unavailable", "Server error " + r.status);
+      if (!r.ok) throw err("invalid_argument", await r.text().catch(() => "Bad request"));
+      return method === "GET" ? r.json() : null;
+    }
+    const meta = { fromCache: false, hasPendingWrites: false };
+    const snap = (path, d) => ({ id: path.split("/").pop(), exists: !!d, data: () => d || void 0, metadata: meta });
+    const qsnap = (rows) => {
+      const docs = rows.map((r) => snap(r.path, r.data));
+      return { docs, size: docs.length, empty: !docs.length, docChanges: () => [], metadata: meta };
+    };
+    const poll = (fetchOnce, next, ms) => {
+      let alive = true, last = null;
+      (async () => {
+        while (alive) {
+          try {
+            const v = await fetchOnce();
+            const k = JSON.stringify(v);
+            if (alive && k !== last) {
+              last = k;
+              next(v);
+            }
+          } catch (e) {
+          }
+          await new Promise((r) => setTimeout(r, ms));
+        }
+      })();
+      return () => {
+        alive = false;
+      };
+    };
+    function doc(path) {
+      const getData = async () => {
+        var _a;
+        const rows = await req("GET", `?path=eq.${enc(path)}&select=data`);
+        return ((_a = rows[0]) == null ? void 0 : _a.data) || null;
+      };
+      const ref = {
+        id: path.split("/").pop(),
+        path,
+        async get() {
+          return snap(path, await getData());
+        },
+        async set(data) {
+          await req("POST", "", { path, data }, { Prefer: "resolution=merge-duplicates,return=minimal" });
+        },
+        async update(data) {
+          const cur = await getData();
+          if (!cur) throw err("invalid_argument", "Document does not exist");
+          await ref.set({ ...cur, ...data });
+        },
+        async delete() {
+          throw err("invalid_argument", "Delete is not supported");
+        },
+        onSnapshot(next) {
+          return poll(getData, (d) => next(snap(path, d)), 1500);
+        },
+        collection(sub) {
+          return collection(path + "/" + sub);
+        }
+      };
+      return ref;
+    }
+    function collection(path, filters = [], lim = 200) {
+      const fetchRows = async () => {
+        let rows = await req("GET", `?parent=eq.${enc(path)}&select=path,data&order=updated_at.desc&limit=300`);
+        rows = rows.filter((r) => filters.every(([f, op, v]) => {
+          var _a;
+          const x = (_a = r.data) == null ? void 0 : _a[f];
+          if (op === ">") return x > v;
+          if (op === ">=") return x >= v;
+          if (op === "<") return x < v;
+          if (op === "<=") return x <= v;
+          if (op === "==") return x === v;
+          if (op === "!=") return x !== v;
+          return true;
+        }));
+        return rows.slice(0, lim);
+      };
+      return {
+        path,
+        doc: (id) => doc(path + "/" + id),
+        where: (f, op, v) => collection(path, [...filters, [f, op, v]], lim),
+        orderBy: () => collection(path, filters, lim),
+        limit: (n) => collection(path, filters, n),
+        async get() {
+          return qsnap(await fetchRows());
+        },
+        onSnapshot(next) {
+          return poll(fetchRows, (rows) => next(qsnap(rows)), 1500);
+        },
+        async add(data) {
+          const d = doc(path + "/p" + Math.random().toString(36).slice(2, 10));
+          await d.set(data);
+          return d;
+        }
+      };
+    }
+    return { doc, collection };
   }
 
   // src/app.jsx
@@ -750,6 +865,12 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     useEffect(() => {
       let alive = true;
       (async () => {
+        const web = window.LF_BACKEND;
+        if (web && web.url && web.key) {
+          await sleep(0);
+          if (alive) setSt({ loading: false, db: makeSupabaseDb(web.url, web.key), room: null });
+          return;
+        }
         for (let i = 0; i < 40 && !(window.claude && typeof window.claude.use === "function"); i++) await sleep(100);
         if (!(window.claude && typeof window.claude.use === "function")) {
           if (alive) setSt({ loading: false, db: null, room: null });
@@ -1077,7 +1198,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     const [code, setCode] = useState(/^[A-Z]{4}$/.test(hashCode) ? hashCode : local.get("lf-last-code") || "");
     const [name, setName] = useState(local.get("lf-name") || "");
     const [recent, setRecent] = useState([]);
-    const [err, setErr] = useState("");
+    const [err2, setErr] = useState("");
     const resumeCode = local.get("lf-host-code");
     useEffect(() => {
       let alive = true;
@@ -1118,7 +1239,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
         inputMode: "text",
         className: "input code-input"
       }
-    )), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Your name"), /* @__PURE__ */ React.createElement("input", { id: "join-name", value: name, onChange: (e) => setName(e.target.value.slice(0, 20)), placeholder: "Cousin Dana", autoComplete: "nickname", className: "input" })), err && /* @__PURE__ */ React.createElement("p", { className: "err", role: "alert" }, err), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-gold btn-big w-full", onClick: () => Sound.ensure() }, "Join")), /* @__PURE__ */ React.createElement("div", { className: "panel host-panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl text-white" }, "Host on the big screen"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Open this on the TV or laptop everyone can see. You'll get a room code for the phones."), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3" }, /* @__PURE__ */ React.createElement(Btn, { kind: "blue", big: true, onClick: onHost }, "Host a new game"), resumeCode && /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: () => onResume(resumeCode) }, "Resume game ", resumeCode)))));
+    )), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Your name"), /* @__PURE__ */ React.createElement("input", { id: "join-name", value: name, onChange: (e) => setName(e.target.value.slice(0, 20)), placeholder: "Cousin Dana", autoComplete: "nickname", className: "input" })), err2 && /* @__PURE__ */ React.createElement("p", { className: "err", role: "alert" }, err2), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-gold btn-big w-full", onClick: () => Sound.ensure() }, "Join")), /* @__PURE__ */ React.createElement("div", { className: "panel host-panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl text-white" }, "Host on the big screen"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Open this on the TV or laptop everyone can see. You'll get a room code for the phones."), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3" }, /* @__PURE__ */ React.createElement(Btn, { kind: "blue", big: true, onClick: onHost }, "Host a new game"), resumeCode && /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: () => onResume(resumeCode) }, "Resume game ", resumeCode)))));
   }
   function Host({ db, room, code, initial, onExit }) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
@@ -1654,7 +1775,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
   }
   function useLibrary(db) {
     const [items, setItems] = useState([]);
-    const [err, setErr] = useState(null);
+    const [err2, setErr] = useState(null);
     const ref = useMemo(() => db.doc("library/questions"), [db]);
     const write = useWriter(ref, setErr);
     const dirty = useRef(false);
@@ -1673,7 +1794,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
       setItems(clean2);
       write({ items: clean2 });
     }, [write]);
-    return [items, save, err];
+    return [items, save, err2];
   }
   function HostTools({ s, act, live, library, saveLibrary, libErr, onClose }) {
     var _a, _b;
@@ -1716,7 +1837,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     }, disabled: !canPlay }, live ? "Switch to it now" : "Play it now"), s.phase === "lobby" && /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, "Start the game first."), live && /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, "Replaces the current round. Nobody scores for it.")), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "\u2713 means already played in this game.")), /* @__PURE__ */ React.createElement("section", { className: "tool-sec" }, /* @__PURE__ */ React.createElement("h3", null, "Game settings"), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement("span", { className: "tool-label" }, "Rounds"), /* @__PURE__ */ React.createElement("div", { className: "stepper" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => act.setRounds(s.settings.rounds - 1), "aria-label": "Fewer rounds" }, "\u2212"), /* @__PURE__ */ React.createElement("b", null, s.settings.rounds), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => act.setRounds(s.settings.rounds + 1), "aria-label": "More rounds" }, "+"))), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement("span", { className: "tool-label" }, "Survey time"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, [15, 30, 45, 60].map((n) => /* @__PURE__ */ React.createElement("button", { key: n, type: "button", className: (s.settings.surveySec || 30) === n ? "on" : "", onClick: () => act.setSurveySec(n) }, n, "s"))))), s.phase !== "lobby" && ids.length > 0 && /* @__PURE__ */ React.createElement("section", { className: "tool-sec" }, /* @__PURE__ */ React.createElement("h3", null, "Players"), /* @__PURE__ */ React.createElement("ul", { className: "tool-players" }, ids.map((p) => /* @__PURE__ */ React.createElement("li", { key: p }, /* @__PURE__ */ React.createElement("span", { className: "tool-name" }, nameOf(s, p)), isTeams && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => act.movePlayer(p) }, "Move to ", teamName(s, teamOf(s, p) === "A" ? "B" : "A")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => act.kick(p) }, "Remove"))))), /* @__PURE__ */ React.createElement("section", { className: "tool-sec" }, /* @__PURE__ */ React.createElement("h3", null, "My questions"), /* @__PURE__ */ React.createElement(QuestionLibrary, { items: library, save: saveLibrary, used: s.usedMine || [], err: libErr }))));
   }
   var blankForm = () => ({ id: null, q: "", rows: Array.from({ length: 7 }, () => ({ t: "", p: "" })) });
-  function QuestionLibrary({ items, save, used, err }) {
+  function QuestionLibrary({ items, save, used, err: err2 }) {
     const [f, setF] = useState(blankForm);
     const [msg, setMsg] = useState("");
     const [del, setDel] = useState(null);
@@ -1755,7 +1876,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
     return /* @__PURE__ */ React.createElement("div", { className: "qlib" }, /* @__PURE__ */ React.createElement("form", { className: "qform", onSubmit: submit }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Question"), /* @__PURE__ */ React.createElement("input", { id: "myq-text", className: "input", value: f.q, maxLength: 120, onChange: (e) => setF({ ...f, q: e.target.value }), placeholder: "Name something Uncle Shlomo always brings to the party" })), /* @__PURE__ */ React.createElement("div", { className: "qrows" }, /* @__PURE__ */ React.createElement("span", { className: "qhead" }, "Answers, top answer first"), /* @__PURE__ */ React.createElement("span", { className: "qhead" }, "Points"), f.rows.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("input", { id: "myq-a" + i, className: "input", value: r.t, maxLength: 32, onChange: (e) => setRow(i, "t", e.target.value), placeholder: `Answer ${i + 1}`, "aria-label": `Answer ${i + 1}` }), /* @__PURE__ */ React.createElement("input", { id: "myq-p" + i, className: "input", value: r.p, inputMode: "numeric", maxLength: 3, onChange: (e) => setRow(i, "p", e.target.value.replace(/[^0-9]/g, "")), placeholder: String(AUTO_PTS[i]), "aria-label": `Points for answer ${i + 1}` })))), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "Leave the points empty to score them in the order you typed. Leave every answer empty and the family survey builds the board when you play it."), /* @__PURE__ */ React.createElement("div", { className: "tool-row" }, /* @__PURE__ */ React.createElement(Btn, { type: "submit" }, f.id ? "Save changes" : "Save question"), (f.id || f.q) && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => {
       setF(blankForm());
       setMsg("");
-    } }, f.id ? "Cancel editing" : "Clear"), msg && /* @__PURE__ */ React.createElement("span", { className: "flash" }, msg)), err === "invalid_argument" && /* @__PURE__ */ React.createElement("p", { className: "err" }, "Couldn't save. Only the game's owner or an Editor can save questions.")), items.length > 0 ? /* @__PURE__ */ React.createElement("ol", { className: "qlist" }, items.map((it, i) => /* @__PURE__ */ React.createElement("li", { key: it.id }, /* @__PURE__ */ React.createElement("div", { className: "qtext" }, /* @__PURE__ */ React.createElement("b", null, used.includes(it.id) ? "\u2713 " : "", it.q), /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, it.a.length ? it.a.map((r) => `${r[0]} (${r[1]})`).join(" \xB7 ") : "Family survey builds the board")), /* @__PURE__ */ React.createElement("div", { className: "qbtns" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => move(i, -1), disabled: i === 0, "aria-label": "Move up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => move(i, 1), disabled: i === items.length - 1, "aria-label": "Move down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => edit(it) }, "Edit"), del === it.id ? /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip chip-warn", onClick: () => {
+    } }, f.id ? "Cancel editing" : "Clear"), msg && /* @__PURE__ */ React.createElement("span", { className: "flash" }, msg)), err2 === "invalid_argument" && /* @__PURE__ */ React.createElement("p", { className: "err" }, "Couldn't save. Only the game's owner or an Editor can save questions.")), items.length > 0 ? /* @__PURE__ */ React.createElement("ol", { className: "qlist" }, items.map((it, i) => /* @__PURE__ */ React.createElement("li", { key: it.id }, /* @__PURE__ */ React.createElement("div", { className: "qtext" }, /* @__PURE__ */ React.createElement("b", null, used.includes(it.id) ? "\u2713 " : "", it.q), /* @__PURE__ */ React.createElement("span", { className: "muted text-sm" }, it.a.length ? it.a.map((r) => `${r[0]} (${r[1]})`).join(" \xB7 ") : "Family survey builds the board")), /* @__PURE__ */ React.createElement("div", { className: "qbtns" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => move(i, -1), disabled: i === 0, "aria-label": "Move up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => move(i, 1), disabled: i === items.length - 1, "aria-label": "Move down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => edit(it) }, "Edit"), del === it.id ? /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip chip-warn", onClick: () => {
       save(items.filter((x) => x.id !== it.id));
       setDel(null);
     } }, "Delete?") : /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => setDel(it.id) }, "Delete"))))) : /* @__PURE__ */ React.createElement("p", { className: "muted" }, "No questions yet. They're saved with the game, so they'll still be here on party night."));
@@ -1862,7 +1983,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outl
                   Sound.buzz();
                   try {
                     navigator.vibrate && navigator.vibrate(60);
-                  } catch (err) {
+                  } catch (err2) {
                   }
                 } else if (!open) {
                   setEarly((n) => n + 1);
