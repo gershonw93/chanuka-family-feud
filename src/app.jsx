@@ -1677,15 +1677,77 @@ function sanitizeItems(raw) {
 }
 
 // Each host keeps their prepared questions under a private set code saved on their device.
+function newSetId() {
+  let r = "";
+  while (r.length < 12) r += rid();
+  return "s" + r.slice(0, 12);
+}
 function getSetId() {
   let id = local.get("lf-set");
   if (!id || !/^s[a-z0-9]{8,16}$/.test(id)) {
-    let r = "";
-    while (r.length < 12) r += rid();
-    id = "s" + r.slice(0, 12);
+    id = newSetId();
     local.set("lf-set", id);
   }
   return id;
+}
+const shareLink = (setId) => (WEB ? `https://${SITE}/#game-${setId}` : `#game-${setId}`);
+
+// Copy text, falling back to selecting it when the clipboard is refused.
+function copyText(text, inputEl, done) {
+  const fallback = () => { try { inputEl?.focus(); inputEl?.select(); } catch (e) {} done("Selected. Press copy on your keyboard or phone."); };
+  try {
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(() => done("Link copied!"), fallback);
+    else fallback();
+  } catch (e) { fallback(); }
+}
+
+// A friend opened a shared link: show what's in it and make them their own copy.
+function SharedGame({ db, setId, onDone, onCancel }) {
+  const [items, , , loaded, setup] = useLibrary(db, setId);
+  const mine = getSetId();
+  const [mineItems, , , mineLoaded] = useLibrary(db, mine);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const own = mine === setId;
+  const take = async () => {
+    if (own) { onDone(); return; }
+    setBusy(true);
+    try {
+      const id = newSetId();
+      await db.doc("library/" + id).set({ items: sanitizeItems(items), game: cleanSetup(setup) });
+      local.set("lf-set-prev", mine);
+      local.set("lf-set", id);
+      onDone();
+    } catch (e) {
+      setErr("Couldn't copy the game. Check your connection and try again.");
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="screen prep">
+      <div className="prep-inner">
+        <h1 className="display shared-title">A Latke Feud game for you!</h1>
+        {!loaded ? <p className="pulse text-xl">Opening the shared game…</p> : !items.length ? (
+          <div className="panel"><p className="text-lg">This shared game has no questions, or the link is wrong. Ask your friend to send it again.</p><Btn kind="ghost" onClick={onCancel}>Go to the start page</Btn></div>
+        ) : (
+          <div className="panel">
+            <p className="text-lg"><b className="gold">{items.length}</b> questions · {setup.rounds} rounds · {setup.mode === "teams" ? `${setup.teamA} vs ${setup.teamB}` : "everyone for themselves"}</p>
+            <ol className="shared-list">{items.map((it) => <li key={it.id}>{it.q}</li>)}</ol>
+            {own ? <p className="muted">This is your own game.</p> : (
+              <p className="muted">You get your own copy. Change anything you like; your friend's game stays as it is.
+                {mineLoaded && mineItems.length > 0 && <> The {mineItems.length} questions you prepared on this device stay saved under your old set code, <span className="set-code-inline">{mine}</span>.</>}
+              </p>
+            )}
+            {err && <p className="err">{err}</p>}
+            <div className="flex flex-wrap gap-3">
+              <Btn big onClick={take} disabled={busy}>{own ? "Open it" : busy ? "Copying…" : "Get this game"}</Btn>
+              <Btn kind="ghost" onClick={onCancel}>No thanks</Btn>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const defaultSetup = () => ({ teamA: TEAMS.A.name, teamB: TEAMS.B.name, rounds: 6, mode: "teams" });
@@ -1745,6 +1807,8 @@ function useLibrary(db, setId) {
 function Prep({ db, onBack, onHost }) {
   const [setId, setSetId] = useState(getSetId);
   const [library, save, err, loaded, setup, saveSetup] = useLibrary(db, setId);
+  const shareRef = useRef(null);
+  const [shareMsg, setShareMsg] = useState("");
   const [other, setOther] = useState("");
   const [msg, setMsg] = useState("");
   const switchSet = (e) => {
@@ -1799,6 +1863,16 @@ function Prep({ db, onBack, onHost }) {
         <section className="panel">
           <h2 className="display text-2xl text-[var(--gold)]">Your questions {loaded ? `(${library.length})` : ""}</h2>
           <QuestionLibrary items={library} save={save} used={[]} err={err} />
+        </section>
+        <section className="panel">
+          <h2 className="display text-2xl text-[var(--gold)]">Share with friends</h2>
+          <p>Send this link to a friend who wants to host their own game with your questions. They get their own copy, so their changes never touch yours. Friends who only play in your game don't need it: they join with the room code on your TV.</p>
+          <div className="flex flex-wrap gap-2">
+            <input id="share-link" ref={shareRef} className="input flex-1 min-w-[14rem] share-in" readOnly value={shareLink(setId)} onFocus={(e) => e.target.select()} />
+            <button type="button" className="btn btn-gold" onClick={() => copyText(shareLink(setId), shareRef.current, setShareMsg)}>Copy link</button>
+          </div>
+          {shareMsg && <p className="flash">{shareMsg}</p>}
+          <p className="muted text-sm">The link shows the answers too, so only send it to people who won't be playing your game.</p>
         </section>
         <section className="panel">
           <h2 className="display text-xl">Your private set code</h2>
@@ -2616,6 +2690,8 @@ function WatchCard({ s, title, hot, answer, mySide }) {
 function App() {
   const caps = useCapabilities();
   const [mode, setMode] = useState(() => {
+    const m = (location.hash || "").match(/^#game-(s[a-z0-9]{8,16})$/);
+    if (m) return { kind: "shared", setId: m[1] };
     try {
       const p = JSON.parse(local.get("lf-player") || "null");
       if (p && /^[A-Z]{4}$/.test(p.code) && p.name) return { kind: "phone", code: p.code, name: p.name };
@@ -2663,6 +2739,10 @@ function App() {
   if (mode.kind === "host") return <Host db={db} room={room} code={mode.code} initial={mode.initial} onExit={() => { local.del("lf-host-code"); setMode({ kind: "landing" }); }} />;
   if (mode.kind === "phone") return <Phone db={db} room={room} code={mode.code} name={mode.name} onLeave={() => setMode({ kind: "landing" })} />;
   if (mode.kind === "remote") return <Remote db={db} code={mode.code} pin={mode.pin} onLeave={() => { local.del("lf-remote"); setMode({ kind: "landing" }); }} />;
+  if (mode.kind === "shared") {
+    const clearHash = () => { try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { location.hash = ""; } };
+    return <SharedGame db={db} setId={mode.setId} onDone={() => { clearHash(); setMode({ kind: "prep" }); }} onCancel={() => { clearHash(); setMode({ kind: "landing" }); }} />;
+  }
   if (mode.kind === "prep") return <Prep db={db} onBack={() => setMode({ kind: "landing" })} onHost={() => host(null)} />;
   return <Landing db={db} onHost={() => host(null)} onResume={(c) => host(c)} onPrep={() => setMode({ kind: "prep" })} onRemote={(code, pin) => { local.set("lf-remote", JSON.stringify({ code, pin })); setMode({ kind: "remote", code, pin }); }} onJoin={(code, name) => setMode({ kind: "phone", code, name })} />;
 }

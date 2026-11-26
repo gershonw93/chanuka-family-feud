@@ -4,21 +4,22 @@
 const err = (code, message) => ({ code, message });
 
 export function makeSupabaseDb(url, key) {
-  const base = url.replace(/\/$/, "") + "/rest/v1/kv";
+  const base = url.replace(/\/$/, "") + "/rest/v1/rpc/";
   const headers = { apikey: key, "Content-Type": "application/json" };
-  const enc = encodeURIComponent;
 
-  async function req(method, query, body, extra = {}) {
+  // All access goes through three database functions: kv_get, kv_list, kv_set.
+  async function rpc(fn, body) {
     let r;
     try {
-      r = await fetch(base + query, { method, headers: { ...headers, ...extra }, body: body ? JSON.stringify(body) : undefined, cache: "no-store" });
+      r = await fetch(base + fn, { method: "POST", headers, body: JSON.stringify(body), cache: "no-store" });
     } catch (e) {
       throw err("unavailable", String(e));
     }
     if (r.status === 429) throw err("resource_exhausted", "Too many requests");
     if (r.status >= 500) throw err("unavailable", "Server error " + r.status);
     if (!r.ok) throw err("invalid_argument", await r.text().catch(() => "Bad request"));
-    return method === "GET" ? r.json() : null;
+    const txt = await r.text();
+    return txt ? JSON.parse(txt) : null;
   }
 
   const meta = { fromCache: false, hasPendingWrites: false };
@@ -43,16 +44,13 @@ export function makeSupabaseDb(url, key) {
   };
 
   function doc(path) {
-    const getData = async () => {
-      const rows = await req("GET", `?path=eq.${enc(path)}&select=data`);
-      return rows[0]?.data || null;
-    };
+    const getData = async () => (await rpc("kv_get", { p_path: path })) || null;
     const ref = {
       id: path.split("/").pop(),
       path,
       async get() { return snap(path, await getData()); },
       async set(data) {
-        await req("POST", "", { path, data }, { Prefer: "resolution=merge-duplicates,return=minimal" });
+        await rpc("kv_set", { p_path: path, p_data: data });
       },
       async update(data) {
         const cur = await getData();
@@ -68,7 +66,7 @@ export function makeSupabaseDb(url, key) {
 
   function collection(path, filters = [], lim = 200) {
     const fetchRows = async () => {
-      let rows = await req("GET", `?parent=eq.${enc(path)}&select=path,data&order=updated_at.desc&limit=300`);
+      let rows = (await rpc("kv_list", { p_parent: path })) || [];
       rows = rows.filter((r) => filters.every(([f, op, v]) => {
         const x = r.data?.[f];
         if (op === ">") return x > v;
