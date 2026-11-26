@@ -91,5 +91,6 @@ export function makeSupabaseDb(url, key) {
     };
   }
 
-  return { doc, collection };
+  // Host account functions (acct_*), called by name.
+  return { doc, collection, rpc };
 }

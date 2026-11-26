@@ -1824,204 +1824,235 @@ function cleanGames(arr) {
     .map((g) => ({ id: g.id, title: clean(g.title, 40) || "Untitled game", at: Number(g.at) || 0 }));
 }
 
-const RC_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-function makeRecoveryCode() {
-  const a = new Uint32Array(16);
-  crypto.getRandomValues(a);
-  const s = Array.from(a, (n) => RC_CHARS[n % RC_CHARS.length]).join("");
-  return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}`;
+// Host accounts: name + 4-digit PIN, checked on the server (5 wrong tries locks it for 15 minutes).
+const ACCT_ERRORS = {
+  bad_name: "Type your name.",
+  bad_pin: "The PIN must be exactly 4 digits.",
+  name_taken: "That name is already used by another host. Add something to make it yours, like a last initial.",
+  no_account: "No host account with that name. Check the spelling, or tap Create account.",
+  no_match: "That doesn't match. Check the name and code and try again.",
+  signed_out: "You've been logged out. Log in again.",
+};
+function acctError(r) {
+  if (!r || !r.error) return null;
+  if (r.error === "wrong_pin") return r.left != null ? `Wrong PIN. ${r.left} ${r.left === 1 ? "try" : "tries"} left before a 15-minute lock.` : "That PIN isn't right.";
+  if (r.error === "locked") return `Too many wrong tries. Try again in ${r.minutes || 15} minutes, or use Forgot PIN.`;
+  return ACCT_ERRORS[r.error] || "Something went wrong. Try again.";
 }
-const normCode = (c) => String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-async function recoveryKey(name, code) {
-  const data = new TextEncoder().encode("latke-feud-recovery|" + name.trim().toLowerCase() + "|" + normCode(code));
-  const h = await crypto.subtle.digest("SHA-256", data);
-  return "a" + Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
+const OFFLINE = "Couldn't reach the game server. Check your connection and try again.";
 
 function useAccount(db) {
-  const [acct, setAcct] = useState(() => {
+  const can = !!(db && typeof db.rpc === "function");
+  const [sess, setSess] = useState(() => {
     try {
-      const a = JSON.parse(local.get("lf-acct") || "null");
-      return a && /^a[0-9a-f]{64}$/.test(a.key) ? a : null;
+      const a = JSON.parse(local.get("lf-sess") || "null");
+      return a && /^[0-9a-f]{48}$/.test(a.token) ? a : null;
     } catch (e) { return null; }
   });
+  const sessRef = useRef(sess);
+  sessRef.current = sess;
   const [games, setGames] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [hasRecovery, setHasRecovery] = useState(true);
   const [newCode, setNewCode] = useState(null);
   const gamesRef = useRef([]);
-  const rkRef = useRef(null);
-  const ref = useMemo(() => (db && acct ? db.doc("accounts/" + acct.key) : null), [db, acct]);
-  const write = useWriter(ref, () => {});
+  const q = useRef({ busy: false, next: null });
+
   useEffect(() => {
     gamesRef.current = [];
-    rkRef.current = null;
     setGames([]);
     setLoaded(false);
-    if (!ref) return;
+    if (!can || !sess) return;
     let alive = true;
-    ref.get().then((sn) => {
+    db.rpc("acct_me", { p_token: sess.token }).then((d) => {
       if (!alive) return;
-      const d = sn.exists ? sn.data() : null;
-      const g = cleanGames(d?.games);
-      rkRef.current = d?.rk || null;
+      if (!d) { local.del("lf-sess"); setSess(null); return; }
+      const g = cleanGames(d.games);
       gamesRef.current = g;
       setGames(g);
-      setHasRecovery(!!d?.rk);
+      setHasRecovery(!!d.has_recovery);
       setLoaded(true);
     }).catch(() => { if (alive) setLoaded(true); });
     return () => { alive = false; };
-  }, [ref]);
+  }, [can, sess?.token]);
+
   const saveGames = (next) => {
     gamesRef.current = next;
     setGames(next);
-    if (acct) write({ name: acct.name, games: next, rk: rkRef.current });
+    q.current.next = next;
+    if (q.current.busy) return;
+    q.current.busy = true;
+    (async () => {
+      while (q.current.next) {
+        const list = q.current.next;
+        q.current.next = null;
+        try { await db.rpc("acct_save_games", { p_token: sessRef.current?.token, p_games: list }); } catch (e) {}
+      }
+      q.current.busy = false;
+    })();
   };
-  const signIn = (key, name) => {
-    const a = { key, name };
-    local.set("lf-acct", JSON.stringify(a));
-    setAcct(a);
+  const signIn = (r) => {
+    const a = { token: r.token, name: r.name };
+    local.set("lf-sess", JSON.stringify(a));
+    sessRef.current = a;
+    setSess(a);
+    if (r.recovery) setNewCode(r.recovery);
   };
-  // Give an account a recovery code: a second document, found by name + code, that points at the account.
-  const attachRecovery = async (key, name) => {
-    const code = makeRecoveryCode();
-    const rk = await recoveryKey(name, code);
-    await db.doc("accounts/" + rk).set({ name, acct: key });
-    return { code, rk };
+  const run = async (fn, args) => {
+    try { return await db.rpc(fn, args); } catch (e) { return { error: "_offline" }; }
   };
-  const login = async (name, pw, create) => {
-    const n = clean(name, 30);
-    if (!n || (pw || "").length < 4) return "Type your name and a password of at least 4 characters.";
-    try {
-      const key = await accountKey(n, pw);
-      const sn = await db.doc("accounts/" + key).get();
-      const d = sn.exists ? sn.data() : null;
-      if (create && d) return "There's already an account with that name and password. Log in instead.";
-      if (!create && (!d || d.acct)) return "No account with that name and password. Check them, or tap Forgot password.";
-      if (!create && d.moved) return "This password was changed. Log in with your new password.";
-      if (create) {
-        // Bring along the game already prepared on this device, if it has questions.
+  const msg = (r) => (r && r.error === "_offline" ? OFFLINE : acctError(r));
+
+  const login = async (name, pin, create) => {
+    if (!clean(name, 30)) return ACCT_ERRORS.bad_name;
+    if (!/^\d{4}$/.test(pin || "")) return ACCT_ERRORS.bad_pin;
+    const r = await run(create ? "acct_create" : "acct_login", { p_name: name, p_pin: pin });
+    if (msg(r)) return msg(r);
+    signIn(r);
+    if (create) {
+      // Bring along the game already prepared on this device, if it has questions.
+      try {
         const cur = getSetId();
         const lib = await db.doc("library/" + cur).get();
         const ld = lib.exists ? lib.data() : null;
-        const start = ld && Array.isArray(ld.items) && ld.items.length ? [{ id: cur, title: cleanSetup(ld.game).title || "My first game", at: Date.now() }] : [];
-        const { code, rk } = await attachRecovery(key, n);
-        await db.doc("accounts/" + key).set({ name: n, games: start, rk });
-        setNewCode(code);
-      }
-      signIn(key, n);
-      return null;
-    } catch (e) {
-      return "Couldn't reach the game server. Check your connection and try again.";
+        if (ld && Array.isArray(ld.items) && ld.items.length) {
+          const start = [{ id: cur, title: cleanSetup(ld.game).title || "My first game", at: Date.now() }];
+          await db.rpc("acct_save_games", { p_token: r.token, p_games: start });
+          gamesRef.current = start;
+          setGames(start);
+        }
+      } catch (e) {}
     }
+    return null;
   };
-  const resetPassword = async (name, code, pw) => {
-    const n = clean(name, 30);
-    if (!n || normCode(code).length !== 16) return "Type your name and the 16-character recovery code.";
-    if ((pw || "").length < 4) return "Pick a new password of at least 4 characters.";
-    try {
-      const rk = await recoveryKey(n, code);
-      const rec = await db.doc("accounts/" + rk).get();
-      const rd = rec.exists ? rec.data() : null;
-      if (!rd || typeof rd.acct !== "string") return "That name and recovery code don't match an account. Check both and try again.";
-      const old = await db.doc("accounts/" + rd.acct).get();
-      const od = old.exists ? old.data() : {};
-      const key = await accountKey(n, pw);
-      if (key !== rd.acct) {
-        const clash = await db.doc("accounts/" + key).get();
-        if (clash.exists) return "Pick a different new password.";
-        await db.doc("accounts/" + key).set({ name: n, games: cleanGames(od.games), rk });
-        await db.doc("accounts/" + rk).set({ name: n, acct: key });
-        await db.doc("accounts/" + rd.acct).set({ name: n, games: [], moved: true });
-      }
-      signIn(key, n);
-      return null;
-    } catch (e) {
-      return "Couldn't reach the game server. Check your connection and try again.";
-    }
+  const resetPin = async (name, code, pin) => {
+    if (!/^\d{4}$/.test(pin || "")) return ACCT_ERRORS.bad_pin;
+    const r = await run("acct_reset", { p_name: name, p_code: code, p_new_pin: pin });
+    if (msg(r)) return msg(r);
+    signIn(r);
+    return null;
   };
-  const setupRecovery = async () => {
-    if (!acct) return;
-    try {
-      const { code, rk } = await attachRecovery(acct.key, acct.name);
-      rkRef.current = rk;
-      write({ name: acct.name, games: gamesRef.current, rk });
-      setHasRecovery(true);
-      setNewCode(code);
-    } catch (e) {}
+  const migrate = async (name, oldPassword, pin) => {
+    if (!/^\d{4}$/.test(pin || "")) return ACCT_ERRORS.bad_pin;
+    const key = await accountKey(clean(name, 30), oldPassword || "");
+    const r = await run("acct_migrate", { p_old_key: key, p_pin: pin });
+    if (msg(r)) return r.error === "no_match" ? "No old account with that name and password." : msg(r);
+    signIn(r);
+    return null;
   };
-  const logout = () => { local.del("lf-acct"); setAcct(null); setNewCode(null); };
+  const changePin = async (oldPin, newPin) => {
+    if (!/^\d{4}$/.test(newPin || "")) return ACCT_ERRORS.bad_pin;
+    const r = await run("acct_change_pin", { p_token: sessRef.current?.token, p_old: oldPin, p_new: newPin });
+    return msg(r);
+  };
+  const newRecovery = async () => {
+    const r = await run("acct_new_recovery", { p_token: sessRef.current?.token });
+    if (!msg(r)) { setNewCode(r.recovery); setHasRecovery(true); }
+    return msg(r);
+  };
+  const logout = () => {
+    const t = sessRef.current?.token;
+    if (t) run("acct_logout", { p_token: t });
+    local.del("lf-sess");
+    setSess(null);
+    setNewCode(null);
+  };
   const addGame = (id, title) => {
-    if (!acct || gamesRef.current.some((g) => g.id === id)) return;
+    if (!sessRef.current || gamesRef.current.some((g) => g.id === id)) return;
     saveGames([{ id, title: clean(title, 40) || "Untitled game", at: Date.now() }, ...gamesRef.current]);
   };
   const renameGame = (id, title) => {
-    if (!acct || !gamesRef.current.some((g) => g.id === id)) return;
+    if (!sessRef.current || !gamesRef.current.some((g) => g.id === id)) return;
     saveGames(gamesRef.current.map((g) => (g.id === id ? { ...g, title: clean(title, 40) || "Untitled game", at: Date.now() } : g)));
   };
   const removeGame = (id) => saveGames(gamesRef.current.filter((g) => g.id !== id));
-  return { acct, games, loaded, login, logout, addGame, renameGame, removeGame, resetPassword, setupRecovery, hasRecovery, newCode, clearNewCode: () => setNewCode(null) };
+  return {
+    can, acct: sess, games, loaded, hasRecovery, newCode, clearNewCode: () => setNewCode(null),
+    login, logout, resetPin, migrate, changePin, newRecovery, addGame, renameGame, removeGame,
+  };
+}
+
+function PinInput({ id, value, onChange, label, autoComplete = "current-password" }) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input id={id} className="input pin-in" type="password" inputMode="numeric" pattern="[0-9]*" maxLength={4} value={value}
+        onChange={(e) => onChange(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))} autoComplete={autoComplete} placeholder="••••" />
+    </label>
+  );
 }
 
 function LoginForm({ account, onBack }) {
   const [view, setView] = useState("login");
   const [name, setName] = useState("");
-  const [pw, setPw] = useState("");
+  const [pin, setPin] = useState("");
   const [code, setCode] = useState("");
+  const [oldPw, setOldPw] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const go = async (fn) => {
-    setBusy(true);
-    setErr("");
-    const e = await fn();
-    if (e) setErr(e);
-    setBusy(false);
-  };
+  const go = async (fn) => { setBusy(true); setErr(""); const e = await fn(); if (e) setErr(e); setBusy(false); };
+  const nameField = (
+    <label className="field">
+      <span>Name</span>
+      <input id="acct-name" className="input" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} autoComplete="username" placeholder="Gershon" />
+    </label>
+  );
+  const switchTo = (v) => { setView(v); setErr(""); setPin(""); };
+
   if (view === "forgot") {
     return (
-      <form className="panel login" onSubmit={(e) => { e.preventDefault(); go(() => account.resetPassword(name, code, pw)); }}>
-        <h2 className="display text-3xl text-[var(--gold)]">Forgot your password?</h2>
-        <p className="muted">Use the recovery code you saved when you made your account, then pick a new password. Your games stay as they are.</p>
-        <label className="field">
-          <span>Name</span>
-          <input id="reset-name" className="input" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} autoComplete="username" />
-        </label>
+      <form className="panel login" onSubmit={(e) => { e.preventDefault(); go(() => account.resetPin(name, code, pin)); }}>
+        <h2 className="display text-3xl text-[var(--gold)]">Forgot your PIN?</h2>
+        <p className="muted">Use the recovery code you saved when you made your account, then pick a new PIN. Your games stay as they are.</p>
+        {nameField}
         <label className="field">
           <span>Recovery code</span>
           <input id="reset-code" className="input code-mono" value={code} maxLength={24} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="XXXX-XXXX-XXXX-XXXX" autoComplete="off" />
         </label>
-        <label className="field">
-          <span>New password</span>
-          <input id="reset-pw" className="input" type="password" value={pw} maxLength={64} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" placeholder="At least 4 characters" />
-        </label>
+        <PinInput id="reset-pin" label="New 4-digit PIN" value={pin} onChange={setPin} autoComplete="new-password" />
         {err && <p className="err" role="alert">{err}</p>}
         <div className="flex flex-wrap gap-3">
-          <button type="submit" className="btn btn-gold btn-big" disabled={busy}>Set new password</button>
-          <Btn kind="ghost" onClick={() => { setView("login"); setErr(""); }}>Back to log in</Btn>
+          <button type="submit" className="btn btn-gold btn-big" disabled={busy}>Set new PIN</button>
+          <Btn kind="ghost" onClick={() => switchTo("login")}>Back to log in</Btn>
         </div>
-        <p className="muted text-sm">Lost the recovery code too? Make a new account. Games you shared with friends stay with them.</p>
+      </form>
+    );
+  }
+  if (view === "migrate") {
+    return (
+      <form className="panel login" onSubmit={(e) => { e.preventDefault(); go(() => account.migrate(name, oldPw, pin)); }}>
+        <h2 className="display text-3xl text-[var(--gold)]">Move my old account</h2>
+        <p className="muted">Made an account with a password before? Log in with it once and pick a 4-digit PIN. Your games come with you.</p>
+        {nameField}
+        <label className="field">
+          <span>Old password</span>
+          <input id="old-pw" className="input" type="password" value={oldPw} maxLength={64} onChange={(e) => setOldPw(e.target.value)} autoComplete="current-password" />
+        </label>
+        <PinInput id="migrate-pin" label="New 4-digit PIN" value={pin} onChange={setPin} autoComplete="new-password" />
+        {err && <p className="err" role="alert">{err}</p>}
+        <div className="flex flex-wrap gap-3">
+          <button type="submit" className="btn btn-gold btn-big" disabled={busy}>Move my account</button>
+          <Btn kind="ghost" onClick={() => switchTo("login")}>Back to log in</Btn>
+        </div>
       </form>
     );
   }
   return (
-    <form className="panel login" onSubmit={(e) => { e.preventDefault(); go(() => account.login(name, pw, false)); }}>
+    <form className="panel login" onSubmit={(e) => { e.preventDefault(); go(() => account.login(name, pin, false)); }}>
       <h2 className="display text-3xl text-[var(--gold)]">Host login</h2>
       <p className="muted">Only the host needs an account. It keeps all the games you prepare, on any device. Players never log in: they just type the room code.</p>
-      <label className="field">
-        <span>Name</span>
-        <input id="acct-name" className="input" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} autoComplete="username" placeholder="Gershon" />
-      </label>
-      <label className="field">
-        <span>Password</span>
-        <input id="acct-pw" className="input" type="password" value={pw} maxLength={64} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" placeholder="At least 4 characters" />
-      </label>
+      {nameField}
+      <PinInput id="acct-pin" label="4-digit PIN" value={pin} onChange={setPin} />
       {err && <p className="err" role="alert">{err}</p>}
       <div className="flex flex-wrap gap-3">
         <button type="submit" className="btn btn-gold btn-big" disabled={busy}>Log in</button>
-        <Btn kind="blue" onClick={() => go(() => account.login(name, pw, true))} disabled={busy}>Create account</Btn>
+        <Btn kind="blue" onClick={() => go(() => account.login(name, pin, true))} disabled={busy}>Create account</Btn>
         <Btn kind="ghost" onClick={onBack}>Back</Btn>
       </div>
-      <button type="button" className="linkish" onClick={() => { setView("forgot"); setErr(""); }}>Forgot password?</button>
+      <div className="flex flex-wrap gap-4">
+        <button type="button" className="linkish" onClick={() => switchTo("forgot")}>Forgot PIN?</button>
+        <button type="button" className="linkish" onClick={() => switchTo("migrate")}>Had an account with a password?</button>
+      </div>
     </form>
   );
 }
@@ -2031,9 +2062,49 @@ function RecoveryCodeNotice({ account }) {
   return (
     <div className="panel recovery">
       <h2 className="display text-2xl text-[var(--gold)]">Save your recovery code</h2>
-      <p>If you ever forget your password, this code lets you set a new one. Take a screenshot or write it down. You won't see it again.</p>
+      <p>If you ever forget your PIN, this code lets you set a new one. Take a screenshot or write it down. You won't see it again.</p>
       <p className="recovery-code">{account.newCode}</p>
       <div><Btn onClick={account.clearNewCode}>I saved it</Btn></div>
+    </div>
+  );
+}
+
+function AccountSettings({ account }) {
+  const [open, setOpen] = useState(false);
+  const [oldPin, setOldPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!open) return <div className="flex flex-wrap gap-3"><button type="button" className="chip" onClick={() => setOpen(true)}>Account settings</button></div>;
+  return (
+    <div className="panel">
+      <div className="prep-head">
+        <h2 className="display text-2xl text-[var(--gold)]">Account settings</h2>
+        <button type="button" className="chip" onClick={() => setOpen(false)}>Close</button>
+      </div>
+      <form className="flex flex-col gap-3" onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true); setErr(""); setMsg("");
+        const er = await account.changePin(oldPin, newPin);
+        if (er) setErr(er); else { setMsg("PIN changed. Use the new one next time you log in."); setOldPin(""); setNewPin(""); }
+        setBusy(false);
+      }}>
+        <h3 className="display text-xl">Change PIN</h3>
+        <div className="setup-grid">
+          <PinInput id="chg-old" label="Current PIN" value={oldPin} onChange={setOldPin} />
+          <PinInput id="chg-new" label="New PIN" value={newPin} onChange={setNewPin} autoComplete="new-password" />
+        </div>
+        {err && <p className="err" role="alert">{err}</p>}
+        {msg && <p className="flash">{msg}</p>}
+        <div><button type="submit" className="btn btn-gold" disabled={busy || oldPin.length !== 4 || newPin.length !== 4}>Change PIN</button></div>
+      </form>
+      <div className="flex flex-col gap-2">
+        <h3 className="display text-xl">Recovery code</h3>
+        <p className="muted">Lost your recovery code? Make a new one. The old code stops working.</p>
+        <div><Btn kind="ghost" onClick={async () => { await account.newRecovery(); try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) {} }}>Make a new recovery code</Btn></div>
+      </div>
+      <div><Btn kind="ghost" onClick={account.logout}>Log out</Btn></div>
     </div>
   );
 }
@@ -2056,6 +2127,19 @@ function MyGames({ db, account, onBack, onEdit, onHost }) {
     return () => { alive = false; };
   }, [ids]);
 
+  if (!account.can) {
+    return (
+      <div className="screen prep">
+        <div className="prep-inner">
+          <h1 className="display shared-title">My games</h1>
+          <div className="panel">
+            <p className="text-lg">Host accounts work on <b>{SITE}</b>. Here you can still prepare one game on this device.</p>
+            <div className="flex flex-wrap gap-3"><Btn onClick={() => onEdit(null)}>Prepare questions</Btn><Btn kind="ghost" onClick={onBack}>Back</Btn></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!account.acct) {
     return (
       <div className="screen prep">
@@ -2090,12 +2174,6 @@ function MyGames({ db, account, onBack, onEdit, onHost }) {
         </div>
         <p className="prep-lead">Logged in as <b>{account.acct.name}</b>. <button type="button" className="linkish" onClick={account.logout}>Log out</button></p>
         <RecoveryCodeNotice account={account} />
-        {account.loaded && !account.hasRecovery && !account.newCode && (
-          <div className="panel recovery">
-            <p>Turn on password recovery so you can get back in if you forget your password.</p>
-            <div><Btn onClick={account.setupRecovery}>Get my recovery code</Btn></div>
-          </div>
-        )}
         <div><Btn big onClick={newGame} disabled={busy}>+ New game</Btn></div>
         {msg && <p className="flash" style={{ overflowWrap: "anywhere" }}>{msg}</p>}
         {!account.loaded ? <p className="pulse">Loading your games…</p> : account.games.length === 0 ? (
@@ -2123,6 +2201,7 @@ function MyGames({ db, account, onBack, onEdit, onHost }) {
             })}
           </ul>
         )}
+        <AccountSettings account={account} />
       </div>
     </div>
   );
