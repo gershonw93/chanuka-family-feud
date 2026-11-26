@@ -257,6 +257,14 @@ a.chip { text-decoration: none; display: inline-block; }
 .shared-list { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 4px; color: var(--white); }
 .share-in { font-size: 1rem; }
 .set-code-inline { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--gold); }
+.login { max-width: 560px; }
+.linkish { background: none; border: 0; color: var(--gold); text-decoration: underline; font: inherit; cursor: pointer; padding: 0; }
+.games-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.game-row { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.game-main { flex: 1 1 260px; min-width: 0; }
+.game-main h2 { font-size: 1.8rem; color: var(--gold); overflow-wrap: anywhere; }
+.game-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.game-btns .btn { font-size: 1rem; padding: .6em 1.1em; }
 .sent-note { font-weight: 700; font-size: 1.2rem; }
 .stage.open { justify-content: center; gap: clamp(16px, 3vh, 36px); }
 .stage.open .question { font-size: clamp(2.2rem, 4.6vw, 5rem); }
@@ -1639,7 +1647,7 @@ a.chip { text-decoration: none; display: inline-block; }
         inputMode: "text",
         className: "input code-input"
       }
-    )), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Your name"), /* @__PURE__ */ React.createElement("input", { id: "join-name", value: name, onChange: (e) => setName(e.target.value.slice(0, 20)), placeholder: "Cousin Dana", autoComplete: "nickname", className: "input" })), err2 && /* @__PURE__ */ React.createElement("p", { className: "err", role: "alert" }, err2), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-gold btn-big w-full", onClick: () => Sound.ensure() }, "Join")), /* @__PURE__ */ React.createElement("div", { className: "panel host-panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl text-white" }, "Host on the big screen"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Open this on the TV or laptop everyone can see. You'll get a room code for the phones."), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3" }, /* @__PURE__ */ React.createElement(Btn, { kind: "blue", big: true, onClick: onHost }, "Host a new game"), /* @__PURE__ */ React.createElement(Btn, { kind: "gold", onClick: onPrep }, "Prepare questions"), resumeCode && /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: () => onResume(resumeCode) }, "Resume game ", resumeCode))), /* @__PURE__ */ React.createElement("form", { id: "remote", className: "panel remote-panel", onSubmit: (e) => {
+    )), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Your name"), /* @__PURE__ */ React.createElement("input", { id: "join-name", value: name, onChange: (e) => setName(e.target.value.slice(0, 20)), placeholder: "Cousin Dana", autoComplete: "nickname", className: "input" })), err2 && /* @__PURE__ */ React.createElement("p", { className: "err", role: "alert" }, err2), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-gold btn-big w-full", onClick: () => Sound.ensure() }, "Join")), /* @__PURE__ */ React.createElement("div", { className: "panel host-panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl text-white" }, "Host on the big screen"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Open this on the TV or laptop everyone can see. You'll get a room code for the phones. Prepare games ahead in ", /* @__PURE__ */ React.createElement("b", null, "My games"), "."), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3" }, /* @__PURE__ */ React.createElement(Btn, { kind: "blue", big: true, onClick: onHost }, "Host a new game"), /* @__PURE__ */ React.createElement(Btn, { kind: "gold", onClick: onPrep }, "My games"), resumeCode && /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: () => onResume(resumeCode) }, "Resume game ", resumeCode))), /* @__PURE__ */ React.createElement("form", { id: "remote", className: "panel remote-panel", onSubmit: (e) => {
       e.preventDefault();
       const c = rcode.trim().toUpperCase();
       if (!/^[A-Z]{4}$/.test(c) || !/^\d{4}$/.test(rpin.trim())) {
@@ -2488,7 +2496,7 @@ a.chip { text-decoration: none; display: inline-block; }
       fallback();
     }
   }
-  function SharedGame({ db, setId, onDone, onCancel }) {
+  function SharedGame({ db, setId, onDone, onCancel, account }) {
     const [items, , , loaded, setup] = useLibrary(db, setId);
     const mine = getSetId();
     const [mineItems, , , mineLoaded] = useLibrary(db, mine);
@@ -2506,6 +2514,7 @@ a.chip { text-decoration: none; display: inline-block; }
         await db.doc("library/" + id).set({ items: sanitizeItems(items), game: cleanSetup(setup) });
         local.set("lf-set-prev", mine);
         local.set("lf-set", id);
+        account == null ? void 0 : account.addGame(id, setup.title || "Shared game");
         onDone();
       } catch (e) {
         setErr("Couldn't copy the game. Check your connection and try again.");
@@ -2514,11 +2523,12 @@ a.chip { text-decoration: none; display: inline-block; }
     };
     return /* @__PURE__ */ React.createElement("div", { className: "screen prep" }, /* @__PURE__ */ React.createElement("div", { className: "prep-inner" }, /* @__PURE__ */ React.createElement("h1", { className: "display shared-title" }, "A Latke Feud game for you!"), !loaded ? /* @__PURE__ */ React.createElement("p", { className: "pulse text-xl" }, "Opening the shared game\u2026") : !items.length ? /* @__PURE__ */ React.createElement("div", { className: "panel" }, /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "This shared game has no questions, or the link is wrong. Ask your friend to send it again."), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: onCancel }, "Go to the start page")) : /* @__PURE__ */ React.createElement("div", { className: "panel" }, /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, /* @__PURE__ */ React.createElement("b", { className: "gold" }, items.length), " questions \xB7 ", setup.rounds, " rounds \xB7 ", setup.mode === "teams" ? `${setup.teamA} vs ${setup.teamB}` : "everyone for themselves"), /* @__PURE__ */ React.createElement("ol", { className: "shared-list" }, items.map((it) => /* @__PURE__ */ React.createElement("li", { key: it.id }, it.q))), own ? /* @__PURE__ */ React.createElement("p", { className: "muted" }, "This is your own game.") : /* @__PURE__ */ React.createElement("p", { className: "muted" }, "You get your own copy. Change anything you like; your friend's game stays as it is.", mineLoaded && mineItems.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, " The ", mineItems.length, " questions you prepared on this device stay saved under your old set code, ", /* @__PURE__ */ React.createElement("span", { className: "set-code-inline" }, mine), ".")), err2 && /* @__PURE__ */ React.createElement("p", { className: "err" }, err2), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: take, disabled: busy }, own ? "Open it" : busy ? "Copying\u2026" : "Get this game"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: onCancel }, "No thanks")))));
   }
-  var defaultSetup = () => ({ teamA: TEAMS.A.name, teamB: TEAMS.B.name, rounds: 6, mode: "teams" });
+  var defaultSetup = () => ({ title: "", teamA: TEAMS.A.name, teamB: TEAMS.B.name, rounds: 6, mode: "teams" });
   function cleanSetup(g) {
     const d = defaultSetup();
     if (!g || typeof g !== "object") return d;
     return {
+      title: clean(g.title, 40),
       teamA: clean(g.teamA, 24) || d.teamA,
       teamB: clean(g.teamB, 24) || d.teamB,
       rounds: Math.max(1, Math.min(30, Math.round(Number(g.rounds) || d.rounds))),
@@ -2568,11 +2578,166 @@ a.chip { text-decoration: none; display: inline-block; }
     }, [write]);
     return [items, save, err2, loaded, setup, saveSetup];
   }
-  function Prep({ db, onBack, onHost }) {
-    const [setId, setSetId] = useState(getSetId);
+  async function accountKey(name, pw) {
+    const data = new TextEncoder().encode("latke-feud|" + name.trim().toLowerCase() + "|" + pw);
+    const h = await crypto.subtle.digest("SHA-256", data);
+    return "a" + Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  function cleanGames(arr) {
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((g) => g && typeof g.id === "string" && /^s[a-z0-9]{8,16}$/.test(g.id)).slice(0, 100).map((g) => ({ id: g.id, title: clean(g.title, 40) || "Untitled game", at: Number(g.at) || 0 }));
+  }
+  function useAccount(db) {
+    const [acct, setAcct] = useState(() => {
+      try {
+        const a = JSON.parse(local.get("lf-acct") || "null");
+        return a && /^a[0-9a-f]{64}$/.test(a.key) ? a : null;
+      } catch (e) {
+        return null;
+      }
+    });
+    const [games, setGames] = useState([]);
+    const [loaded, setLoaded] = useState(false);
+    const gamesRef = useRef([]);
+    const ref = useMemo(() => db && acct ? db.doc("accounts/" + acct.key) : null, [db, acct]);
+    const write = useWriter(ref, () => {
+    });
+    useEffect(() => {
+      gamesRef.current = [];
+      setGames([]);
+      setLoaded(false);
+      if (!ref) return;
+      let alive = true;
+      ref.get().then((sn) => {
+        var _a;
+        if (!alive) return;
+        const g = sn.exists ? cleanGames((_a = sn.data()) == null ? void 0 : _a.games) : [];
+        gamesRef.current = g;
+        setGames(g);
+        setLoaded(true);
+      }).catch(() => {
+        if (alive) setLoaded(true);
+      });
+      return () => {
+        alive = false;
+      };
+    }, [ref]);
+    const saveGames = (next) => {
+      gamesRef.current = next;
+      setGames(next);
+      if (acct) write({ name: acct.name, games: next });
+    };
+    const login = async (name, pw, create) => {
+      const n = clean(name, 30);
+      if (!n || (pw || "").length < 4) return "Type your name and a password of at least 4 characters.";
+      try {
+        const key = await accountKey(n, pw);
+        const sn = await db.doc("accounts/" + key).get();
+        if (create && sn.exists) return "There's already an account with that name and password. Log in instead.";
+        if (!create && !sn.exists) return "No account with that name and password. Check them, or create a new account.";
+        if (create) {
+          const cur = getSetId();
+          const lib = await db.doc("library/" + cur).get();
+          const d = lib.exists ? lib.data() : null;
+          const start = d && Array.isArray(d.items) && d.items.length ? [{ id: cur, title: cleanSetup(d.game).title || "My first game", at: Date.now() }] : [];
+          await db.doc("accounts/" + key).set({ name: n, games: start });
+        }
+        const a = { key, name: n };
+        local.set("lf-acct", JSON.stringify(a));
+        setAcct(a);
+        return null;
+      } catch (e) {
+        return "Couldn't reach the game server. Check your connection and try again.";
+      }
+    };
+    const logout = () => {
+      local.del("lf-acct");
+      setAcct(null);
+    };
+    const addGame = (id, title) => {
+      if (!acct || gamesRef.current.some((g) => g.id === id)) return;
+      saveGames([{ id, title: clean(title, 40) || "Untitled game", at: Date.now() }, ...gamesRef.current]);
+    };
+    const renameGame = (id, title) => {
+      if (!acct || !gamesRef.current.some((g) => g.id === id)) return;
+      saveGames(gamesRef.current.map((g) => g.id === id ? { ...g, title: clean(title, 40) || "Untitled game", at: Date.now() } : g));
+    };
+    const removeGame = (id) => saveGames(gamesRef.current.filter((g) => g.id !== id));
+    return { acct, games, loaded, login, logout, addGame, renameGame, removeGame };
+  }
+  function LoginForm({ account, onBack }) {
+    const [name, setName] = useState("");
+    const [pw, setPw] = useState("");
+    const [err2, setErr] = useState("");
+    const [busy, setBusy] = useState(false);
+    const go = async (create) => {
+      setBusy(true);
+      setErr("");
+      const e = await account.login(name, pw, create);
+      if (e) setErr(e);
+      setBusy(false);
+    };
+    return /* @__PURE__ */ React.createElement("form", { className: "panel login", onSubmit: (e) => {
+      e.preventDefault();
+      go(false);
+    } }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl text-[var(--gold)]" }, "Log in to your games"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Your account keeps all the games you prepare, on any device. New here? Pick a name and password and tap Create account."), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Name"), /* @__PURE__ */ React.createElement("input", { id: "acct-name", className: "input", value: name, maxLength: 30, onChange: (e) => setName(e.target.value), autoComplete: "username", placeholder: "Gershon" })), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Password"), /* @__PURE__ */ React.createElement("input", { id: "acct-pw", className: "input", type: "password", value: pw, maxLength: 64, onChange: (e) => setPw(e.target.value), autoComplete: "current-password", placeholder: "At least 4 characters" })), err2 && /* @__PURE__ */ React.createElement("p", { className: "err", role: "alert" }, err2), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3" }, /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-gold btn-big", disabled: busy }, "Log in"), /* @__PURE__ */ React.createElement(Btn, { kind: "blue", onClick: () => go(true), disabled: busy }, "Create account"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: onBack }, "Back")), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "There's no password reset, so pick something you'll remember. Your name and password together open your account."));
+  }
+  function MyGames({ db, account, onBack, onEdit, onHost }) {
+    const [info, setInfo] = useState({});
+    const [confirmDel, setConfirmDel] = useState(null);
+    const [msg, setMsg] = useState("");
+    const [busy, setBusy] = useState(false);
+    const ids = account.games.map((g) => g.id).join(",");
+    useEffect(() => {
+      let alive = true;
+      account.games.forEach((g) => {
+        db.doc("library/" + g.id).get().then((sn) => {
+          if (!alive) return;
+          const d = sn.exists ? sn.data() : null;
+          setInfo((x) => ({ ...x, [g.id]: { n: Array.isArray(d == null ? void 0 : d.items) ? d.items.length : 0, setup: cleanSetup(d == null ? void 0 : d.game) } }));
+        }).catch(() => {
+        });
+      });
+      return () => {
+        alive = false;
+      };
+    }, [ids]);
+    if (!account.acct) {
+      return /* @__PURE__ */ React.createElement("div", { className: "screen prep" }, /* @__PURE__ */ React.createElement("div", { className: "prep-inner" }, /* @__PURE__ */ React.createElement("h1", { className: "display shared-title" }, "My games"), /* @__PURE__ */ React.createElement(LoginForm, { account, onBack })));
+    }
+    const newGame2 = async () => {
+      setBusy(true);
+      try {
+        const id = newSetId();
+        await db.doc("library/" + id).set({ items: [], game: { ...defaultSetup(), title: "New game" } });
+        account.addGame(id, "New game");
+        onEdit(id);
+      } catch (e) {
+        setMsg("Couldn't create the game. Check your connection and try again.");
+      }
+      setBusy(false);
+    };
+    const share = (id) => copyText(shareLink(id), null, (m) => {
+      setMsg(m.startsWith("Link") ? "Share link copied! Send it to a friend." : shareLink(id));
+    });
+    return /* @__PURE__ */ React.createElement("div", { className: "screen prep" }, /* @__PURE__ */ React.createElement("div", { className: "prep-inner" }, /* @__PURE__ */ React.createElement("div", { className: "prep-head" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "My games"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: onBack }, "Back")), /* @__PURE__ */ React.createElement("p", { className: "prep-lead" }, "Logged in as ", /* @__PURE__ */ React.createElement("b", null, account.acct.name), ". ", /* @__PURE__ */ React.createElement("button", { type: "button", className: "linkish", onClick: account.logout }, "Log out")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: newGame2, disabled: busy }, "+ New game")), msg && /* @__PURE__ */ React.createElement("p", { className: "flash", style: { overflowWrap: "anywhere" } }, msg), !account.loaded ? /* @__PURE__ */ React.createElement("p", { className: "pulse" }, "Loading your games\u2026") : account.games.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "panel" }, /* @__PURE__ */ React.createElement("p", { className: "text-lg" }, "No games yet. Tap ", /* @__PURE__ */ React.createElement("b", null, "+ New game"), " to make your first one.")) : /* @__PURE__ */ React.createElement("ul", { className: "games-list" }, account.games.map((g) => {
+      const i = info[g.id];
+      return /* @__PURE__ */ React.createElement("li", { key: g.id, className: "panel game-row" }, /* @__PURE__ */ React.createElement("div", { className: "game-main" }, /* @__PURE__ */ React.createElement("h2", { className: "display" }, g.title), /* @__PURE__ */ React.createElement("p", { className: "muted" }, i ? `${i.n} ${i.n === 1 ? "question" : "questions"} \xB7 ${i.setup.rounds} rounds \xB7 ${i.setup.mode === "teams" ? `${i.setup.teamA} vs ${i.setup.teamB}` : "everyone for themselves"}` : "\u2026")), /* @__PURE__ */ React.createElement("div", { className: "game-btns" }, /* @__PURE__ */ React.createElement(Btn, { onClick: () => onHost(g.id) }, "Host it"), /* @__PURE__ */ React.createElement(Btn, { kind: "blue", onClick: () => onEdit(g.id) }, "Edit"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: () => share(g.id) }, "Share"), confirmDel === g.id ? /* @__PURE__ */ React.createElement(Btn, { kind: "red", onClick: () => {
+        account.removeGame(g.id);
+        setConfirmDel(null);
+      } }, "Remove it?") : /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: () => setConfirmDel(g.id) }, "Remove")));
+    }))));
+  }
+  function Prep({ db, onBack, onHost, account, initialSetId }) {
+    const [setId, setSetId] = useState(() => initialSetId || getSetId());
     const [library, save, err2, loaded, setup, saveSetup] = useLibrary(db, setId);
     const shareRef = useRef(null);
     const [shareMsg, setShareMsg] = useState("");
+    useEffect(() => {
+      if ((account == null ? void 0 : account.acct) && account.loaded && loaded && library.length > 0 && !account.games.some((g) => g.id === setId)) {
+        account.addGame(setId, setup.title || "My game");
+      }
+    }, [account == null ? void 0 : account.acct, account == null ? void 0 : account.loaded, loaded, library.length, setId]);
     const [other, setOther] = useState("");
     const [msg, setMsg] = useState("");
     const switchSet = (e) => {
@@ -2587,7 +2752,10 @@ a.chip { text-decoration: none; display: inline-block; }
       setOther("");
       setMsg("Loaded that question set.");
     };
-    return /* @__PURE__ */ React.createElement("div", { className: "screen prep" }, /* @__PURE__ */ React.createElement("div", { className: "prep-inner" }, /* @__PURE__ */ React.createElement("div", { className: "prep-head" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Prepare your game"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: onBack }, "Back")), /* @__PURE__ */ React.createElement("p", { className: "prep-lead" }, "Set up your game days ahead: team names, rounds, and your own questions and answers. Everything saves automatically and is still here when you come back. Players never see this screen. On party night, tap ", /* @__PURE__ */ React.createElement("b", null, "Host a new game"), " on the same device, and during the game tap ", /* @__PURE__ */ React.createElement("b", null, "My next question"), " to play your questions in order."), /* @__PURE__ */ React.createElement("section", { className: "panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-2xl text-[var(--gold)]" }, "Game setup"), /* @__PURE__ */ React.createElement("div", { className: "setup-grid" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Team 1 name"), /* @__PURE__ */ React.createElement("input", { id: "setup-team-a", className: "input", value: setup.teamA, maxLength: 24, onChange: (e) => saveSetup({ teamA: e.target.value }) })), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Team 2 name"), /* @__PURE__ */ React.createElement("input", { id: "setup-team-b", className: "input", value: setup.teamB, maxLength: 24, onChange: (e) => saveSetup({ teamB: e.target.value }) }))), /* @__PURE__ */ React.createElement("div", { className: "settings" }, /* @__PURE__ */ React.createElement("div", { className: "setting" }, /* @__PURE__ */ React.createElement("span", { className: "setting-label" }, "Rounds"), /* @__PURE__ */ React.createElement("div", { className: "stepper" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => saveSetup({ rounds: Math.max(1, setup.rounds - 1) }), "aria-label": "Fewer rounds" }, "\u2212"), /* @__PURE__ */ React.createElement("b", null, setup.rounds), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => saveSetup({ rounds: Math.min(30, setup.rounds + 1) }), "aria-label": "More rounds" }, "+")), library.length > 0 && setup.rounds !== library.length && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => saveSetup({ rounds: Math.min(30, library.length) }) }, "Match my ", library.length, " questions")), /* @__PURE__ */ React.createElement("div", { className: "setting" }, /* @__PURE__ */ React.createElement("span", { className: "setting-label" }, "Play as"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: setup.mode === "teams" ? "on" : "", onClick: () => saveSetup({ mode: "teams" }) }, "Two teams"), /* @__PURE__ */ React.createElement("button", { type: "button", className: setup.mode === "solo" ? "on" : "", onClick: () => saveSetup({ mode: "solo" }) }, "Everyone for themselves")))), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "Saved automatically. When you host from this device, the game starts with these settings.")), /* @__PURE__ */ React.createElement("section", { className: "panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-2xl text-[var(--gold)]" }, "Your questions ", loaded ? `(${library.length})` : ""), /* @__PURE__ */ React.createElement(QuestionLibrary, { items: library, save, used: [], err: err2 })), /* @__PURE__ */ React.createElement("section", { className: "panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-2xl text-[var(--gold)]" }, "Share with friends"), /* @__PURE__ */ React.createElement("p", null, "Send this link to a friend who wants to host their own game with your questions. They get their own copy, so their changes never touch yours. Friends who only play in your game don't need it: they join with the room code on your TV."), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-2" }, /* @__PURE__ */ React.createElement("input", { id: "share-link", ref: shareRef, className: "input flex-1 min-w-[14rem] share-in", readOnly: true, value: shareLink(setId), onFocus: (e) => e.target.select() }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-gold", onClick: () => copyText(shareLink(setId), shareRef.current, setShareMsg) }, "Copy link")), shareMsg && /* @__PURE__ */ React.createElement("p", { className: "flash" }, shareMsg), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "The link shows the answers too, so only send it to people who won't be playing your game.")), /* @__PURE__ */ React.createElement("section", { className: "panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-xl" }, "Your private set code"), /* @__PURE__ */ React.createElement("p", null, "Your questions are saved under this code, and this device remembers it. To edit or host them from another device, type the code there."), /* @__PURE__ */ React.createElement("p", { className: "set-code" }, setId), /* @__PURE__ */ React.createElement("form", { className: "flex flex-wrap gap-2", onSubmit: switchSet }, /* @__PURE__ */ React.createElement("input", { id: "set-code", className: "input flex-1 min-w-[12rem]", value: other, onChange: (e) => setOther(e.target.value), placeholder: "Use a set code from another device", autoComplete: "off" }), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-ghost", disabled: !other.trim() }, "Load")), msg && /* @__PURE__ */ React.createElement("p", { className: "flash" }, msg)), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: onHost }, "Host a game", library.length ? ` with these ${library.length} questions` : ""), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: onBack }, "Back"))));
+    return /* @__PURE__ */ React.createElement("div", { className: "screen prep" }, /* @__PURE__ */ React.createElement("div", { className: "prep-inner" }, /* @__PURE__ */ React.createElement("div", { className: "prep-head" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Prepare your game"), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: onBack }, "Back")), /* @__PURE__ */ React.createElement("p", { className: "prep-lead" }, "Set up your game days ahead: team names, rounds, and your own questions and answers. Everything saves automatically and is still here when you come back. Players never see this screen. On party night, tap ", /* @__PURE__ */ React.createElement("b", null, "Host a new game"), " on the same device, and during the game tap ", /* @__PURE__ */ React.createElement("b", null, "My next question"), " to play your questions in order."), /* @__PURE__ */ React.createElement("section", { className: "panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-2xl text-[var(--gold)]" }, "Game setup"), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Game name"), /* @__PURE__ */ React.createElement("input", { id: "setup-title", className: "input", value: setup.title, maxLength: 40, placeholder: "Chanukah night 3 at Bubby's", onChange: (e) => {
+      saveSetup({ title: e.target.value });
+      account == null ? void 0 : account.renameGame(setId, e.target.value);
+    } })), /* @__PURE__ */ React.createElement("div", { className: "setup-grid" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Team 1 name"), /* @__PURE__ */ React.createElement("input", { id: "setup-team-a", className: "input", value: setup.teamA, maxLength: 24, onChange: (e) => saveSetup({ teamA: e.target.value }) })), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Team 2 name"), /* @__PURE__ */ React.createElement("input", { id: "setup-team-b", className: "input", value: setup.teamB, maxLength: 24, onChange: (e) => saveSetup({ teamB: e.target.value }) }))), /* @__PURE__ */ React.createElement("div", { className: "settings" }, /* @__PURE__ */ React.createElement("div", { className: "setting" }, /* @__PURE__ */ React.createElement("span", { className: "setting-label" }, "Rounds"), /* @__PURE__ */ React.createElement("div", { className: "stepper" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => saveSetup({ rounds: Math.max(1, setup.rounds - 1) }), "aria-label": "Fewer rounds" }, "\u2212"), /* @__PURE__ */ React.createElement("b", null, setup.rounds), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => saveSetup({ rounds: Math.min(30, setup.rounds + 1) }), "aria-label": "More rounds" }, "+")), library.length > 0 && setup.rounds !== library.length && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip", onClick: () => saveSetup({ rounds: Math.min(30, library.length) }) }, "Match my ", library.length, " questions")), /* @__PURE__ */ React.createElement("div", { className: "setting" }, /* @__PURE__ */ React.createElement("span", { className: "setting-label" }, "Play as"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: setup.mode === "teams" ? "on" : "", onClick: () => saveSetup({ mode: "teams" }) }, "Two teams"), /* @__PURE__ */ React.createElement("button", { type: "button", className: setup.mode === "solo" ? "on" : "", onClick: () => saveSetup({ mode: "solo" }) }, "Everyone for themselves")))), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "Saved automatically. When you host from this device, the game starts with these settings.")), /* @__PURE__ */ React.createElement("section", { className: "panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-2xl text-[var(--gold)]" }, "Your questions ", loaded ? `(${library.length})` : ""), /* @__PURE__ */ React.createElement(QuestionLibrary, { items: library, save, used: [], err: err2 })), /* @__PURE__ */ React.createElement("section", { className: "panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-2xl text-[var(--gold)]" }, "Share with friends"), /* @__PURE__ */ React.createElement("p", null, "Send this link to a friend who wants to host their own game with your questions. They get their own copy, so their changes never touch yours. Friends who only play in your game don't need it: they join with the room code on your TV."), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-2" }, /* @__PURE__ */ React.createElement("input", { id: "share-link", ref: shareRef, className: "input flex-1 min-w-[14rem] share-in", readOnly: true, value: shareLink(setId), onFocus: (e) => e.target.select() }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "btn btn-gold", onClick: () => copyText(shareLink(setId), shareRef.current, setShareMsg) }, "Copy link")), shareMsg && /* @__PURE__ */ React.createElement("p", { className: "flash" }, shareMsg), /* @__PURE__ */ React.createElement("p", { className: "muted text-sm" }, "The link shows the answers too, so only send it to people who won't be playing your game.")), /* @__PURE__ */ React.createElement("section", { className: "panel" }, /* @__PURE__ */ React.createElement("h2", { className: "display text-xl" }, "Your private set code"), /* @__PURE__ */ React.createElement("p", null, "Your questions are saved under this code, and this device remembers it. To edit or host them from another device, type the code there."), /* @__PURE__ */ React.createElement("p", { className: "set-code" }, setId), /* @__PURE__ */ React.createElement("form", { className: "flex flex-wrap gap-2", onSubmit: switchSet }, /* @__PURE__ */ React.createElement("input", { id: "set-code", className: "input flex-1 min-w-[12rem]", value: other, onChange: (e) => setOther(e.target.value), placeholder: "Use a set code from another device", autoComplete: "off" }), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn btn-ghost", disabled: !other.trim() }, "Load")), msg && /* @__PURE__ */ React.createElement("p", { className: "flash" }, msg)), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-3" }, /* @__PURE__ */ React.createElement(Btn, { big: true, onClick: onHost }, "Host a game", library.length ? ` with these ${library.length} questions` : ""), /* @__PURE__ */ React.createElement(Btn, { kind: "ghost", onClick: onBack }, "Back"))));
   }
   function HostTools({ s, act, live, library, saveLibrary, libErr, pin, code, onClose }) {
     var _a, _b;
@@ -2966,6 +3134,15 @@ a.chip { text-decoration: none; display: inline-block; }
       return { kind: "landing" };
     });
     const [busy, setBusy] = useState("");
+    const account = useAccount(caps.db);
+    useEffect(() => {
+      const onHash = () => {
+        const m = (location.hash || "").match(/^#game-(s[a-z0-9]{8,16})$/);
+        if (m) setMode({ kind: "shared", setId: m[1] });
+      };
+      window.addEventListener("hashchange", onHash);
+      return () => window.removeEventListener("hashchange", onHash);
+    }, []);
     if (caps.loading) return /* @__PURE__ */ React.createElement("div", { className: "screen center" }, /* @__PURE__ */ React.createElement("p", { className: "pulse text-2xl" }, "Lighting the candles\u2026"));
     if (!caps.db) {
       return /* @__PURE__ */ React.createElement(ErrorScreen, { title: "Shared storage isn't available" }, /* @__PURE__ */ React.createElement("p", null, "This game keeps the TV and everyone's phones in sync through the artifact's shared storage, and this view can't reach it."), /* @__PURE__ */ React.createElement("p", null, "Open the game from its claude.ai link and make sure you're signed in to Claude. If you are, reload the page."), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "People outside your organization need to be invited to the game by email to send buzzes and answers."));
@@ -3013,7 +3190,7 @@ a.chip { text-decoration: none; display: inline-block; }
           location.hash = "";
         }
       };
-      return /* @__PURE__ */ React.createElement(SharedGame, { db, setId: mode.setId, onDone: () => {
+      return /* @__PURE__ */ React.createElement(SharedGame, { db, account, setId: mode.setId, onDone: () => {
         clearHash();
         setMode({ kind: "prep" });
       }, onCancel: () => {
@@ -3021,8 +3198,17 @@ a.chip { text-decoration: none; display: inline-block; }
         setMode({ kind: "landing" });
       } });
     }
-    if (mode.kind === "prep") return /* @__PURE__ */ React.createElement(Prep, { db, onBack: () => setMode({ kind: "landing" }), onHost: () => host(null) });
-    return /* @__PURE__ */ React.createElement(Landing, { db, onHost: () => host(null), onResume: (c) => host(c), onPrep: () => setMode({ kind: "prep" }), onRemote: (code, pin) => {
+    const openPrep = (id) => {
+      if (id) local.set("lf-set", id);
+      setMode({ kind: "prep", setId: id || null });
+    };
+    const hostSet = (id) => {
+      if (id) local.set("lf-set", id);
+      host(null);
+    };
+    if (mode.kind === "games") return /* @__PURE__ */ React.createElement(MyGames, { db, account, onBack: () => setMode({ kind: "landing" }), onEdit: openPrep, onHost: hostSet });
+    if (mode.kind === "prep") return /* @__PURE__ */ React.createElement(Prep, { key: mode.setId || "device", db, account, initialSetId: mode.setId, onBack: () => setMode({ kind: account.acct ? "games" : "landing" }), onHost: () => host(null) });
+    return /* @__PURE__ */ React.createElement(Landing, { db, onHost: () => host(null), onResume: (c) => host(c), onPrep: () => setMode({ kind: "games" }), onRemote: (code, pin) => {
       local.set("lf-remote", JSON.stringify({ code, pin }));
       setMode({ kind: "remote", code, pin });
     }, onJoin: (code, name) => setMode({ kind: "phone", code, name }) });

@@ -684,10 +684,10 @@ function Landing({ db, onHost, onResume, onJoin, onPrep, onRemote }) {
 
         <div className="panel host-panel">
           <h2 className="display text-3xl text-white">Host on the big screen</h2>
-          <p className="muted">Open this on the TV or laptop everyone can see. You'll get a room code for the phones.</p>
+          <p className="muted">Open this on the TV or laptop everyone can see. You'll get a room code for the phones. Prepare games ahead in <b>My games</b>.</p>
           <div className="flex flex-wrap gap-3">
             <Btn kind="blue" big onClick={onHost}>Host a new game</Btn>
-            <Btn kind="gold" onClick={onPrep}>Prepare questions</Btn>
+            <Btn kind="gold" onClick={onPrep}>My games</Btn>
             {resumeCode && <Btn kind="ghost" onClick={() => onResume(resumeCode)}>Resume game {resumeCode}</Btn>}
           </div>
         </div>
@@ -1702,7 +1702,7 @@ function copyText(text, inputEl, done) {
 }
 
 // A friend opened a shared link: show what's in it and make them their own copy.
-function SharedGame({ db, setId, onDone, onCancel }) {
+function SharedGame({ db, setId, onDone, onCancel, account }) {
   const [items, , , loaded, setup] = useLibrary(db, setId);
   const mine = getSetId();
   const [mineItems, , , mineLoaded] = useLibrary(db, mine);
@@ -1717,6 +1717,7 @@ function SharedGame({ db, setId, onDone, onCancel }) {
       await db.doc("library/" + id).set({ items: sanitizeItems(items), game: cleanSetup(setup) });
       local.set("lf-set-prev", mine);
       local.set("lf-set", id);
+      account?.addGame(id, setup.title || "Shared game");
       onDone();
     } catch (e) {
       setErr("Couldn't copy the game. Check your connection and try again.");
@@ -1750,11 +1751,12 @@ function SharedGame({ db, setId, onDone, onCancel }) {
   );
 }
 
-const defaultSetup = () => ({ teamA: TEAMS.A.name, teamB: TEAMS.B.name, rounds: 6, mode: "teams" });
+const defaultSetup = () => ({ title: "", teamA: TEAMS.A.name, teamB: TEAMS.B.name, rounds: 6, mode: "teams" });
 function cleanSetup(g) {
   const d = defaultSetup();
   if (!g || typeof g !== "object") return d;
   return {
+    title: clean(g.title, 40),
     teamA: clean(g.teamA, 24) || d.teamA,
     teamB: clean(g.teamB, 24) || d.teamB,
     rounds: Math.max(1, Math.min(30, Math.round(Number(g.rounds) || d.rounds))),
@@ -1804,11 +1806,222 @@ function useLibrary(db, setId) {
   return [items, save, err, loaded, setup, saveSetup];
 }
 
-function Prep({ db, onBack, onHost }) {
-  const [setId, setSetId] = useState(getSetId);
+/* ------------------------------------------------------------------ */
+/* Accounts: a name + password opens your list of saved games          */
+/* ------------------------------------------------------------------ */
+
+async function accountKey(name, pw) {
+  const data = new TextEncoder().encode("latke-feud|" + name.trim().toLowerCase() + "|" + pw);
+  const h = await crypto.subtle.digest("SHA-256", data);
+  return "a" + Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function cleanGames(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((g) => g && typeof g.id === "string" && /^s[a-z0-9]{8,16}$/.test(g.id))
+    .slice(0, 100)
+    .map((g) => ({ id: g.id, title: clean(g.title, 40) || "Untitled game", at: Number(g.at) || 0 }));
+}
+
+function useAccount(db) {
+  const [acct, setAcct] = useState(() => {
+    try {
+      const a = JSON.parse(local.get("lf-acct") || "null");
+      return a && /^a[0-9a-f]{64}$/.test(a.key) ? a : null;
+    } catch (e) { return null; }
+  });
+  const [games, setGames] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const gamesRef = useRef([]);
+  const ref = useMemo(() => (db && acct ? db.doc("accounts/" + acct.key) : null), [db, acct]);
+  const write = useWriter(ref, () => {});
+  useEffect(() => {
+    gamesRef.current = [];
+    setGames([]);
+    setLoaded(false);
+    if (!ref) return;
+    let alive = true;
+    ref.get().then((sn) => {
+      if (!alive) return;
+      const g = sn.exists ? cleanGames(sn.data()?.games) : [];
+      gamesRef.current = g;
+      setGames(g);
+      setLoaded(true);
+    }).catch(() => { if (alive) setLoaded(true); });
+    return () => { alive = false; };
+  }, [ref]);
+  const saveGames = (next) => {
+    gamesRef.current = next;
+    setGames(next);
+    if (acct) write({ name: acct.name, games: next });
+  };
+  const login = async (name, pw, create) => {
+    const n = clean(name, 30);
+    if (!n || (pw || "").length < 4) return "Type your name and a password of at least 4 characters.";
+    try {
+      const key = await accountKey(n, pw);
+      const sn = await db.doc("accounts/" + key).get();
+      if (create && sn.exists) return "There's already an account with that name and password. Log in instead.";
+      if (!create && !sn.exists) return "No account with that name and password. Check them, or create a new account.";
+      if (create) {
+        // Bring along the game already prepared on this device, if it has questions.
+        const cur = getSetId();
+        const lib = await db.doc("library/" + cur).get();
+        const d = lib.exists ? lib.data() : null;
+        const start = d && Array.isArray(d.items) && d.items.length ? [{ id: cur, title: cleanSetup(d.game).title || "My first game", at: Date.now() }] : [];
+        await db.doc("accounts/" + key).set({ name: n, games: start });
+      }
+      const a = { key, name: n };
+      local.set("lf-acct", JSON.stringify(a));
+      setAcct(a);
+      return null;
+    } catch (e) {
+      return "Couldn't reach the game server. Check your connection and try again.";
+    }
+  };
+  const logout = () => { local.del("lf-acct"); setAcct(null); };
+  const addGame = (id, title) => {
+    if (!acct || gamesRef.current.some((g) => g.id === id)) return;
+    saveGames([{ id, title: clean(title, 40) || "Untitled game", at: Date.now() }, ...gamesRef.current]);
+  };
+  const renameGame = (id, title) => {
+    if (!acct || !gamesRef.current.some((g) => g.id === id)) return;
+    saveGames(gamesRef.current.map((g) => (g.id === id ? { ...g, title: clean(title, 40) || "Untitled game", at: Date.now() } : g)));
+  };
+  const removeGame = (id) => saveGames(gamesRef.current.filter((g) => g.id !== id));
+  return { acct, games, loaded, login, logout, addGame, renameGame, removeGame };
+}
+
+function LoginForm({ account, onBack }) {
+  const [name, setName] = useState("");
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const go = async (create) => {
+    setBusy(true);
+    setErr("");
+    const e = await account.login(name, pw, create);
+    if (e) setErr(e);
+    setBusy(false);
+  };
+  return (
+    <form className="panel login" onSubmit={(e) => { e.preventDefault(); go(false); }}>
+      <h2 className="display text-3xl text-[var(--gold)]">Log in to your games</h2>
+      <p className="muted">Your account keeps all the games you prepare, on any device. New here? Pick a name and password and tap Create account.</p>
+      <label className="field">
+        <span>Name</span>
+        <input id="acct-name" className="input" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} autoComplete="username" placeholder="Gershon" />
+      </label>
+      <label className="field">
+        <span>Password</span>
+        <input id="acct-pw" className="input" type="password" value={pw} maxLength={64} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" placeholder="At least 4 characters" />
+      </label>
+      {err && <p className="err" role="alert">{err}</p>}
+      <div className="flex flex-wrap gap-3">
+        <button type="submit" className="btn btn-gold btn-big" disabled={busy}>Log in</button>
+        <Btn kind="blue" onClick={() => go(true)} disabled={busy}>Create account</Btn>
+        <Btn kind="ghost" onClick={onBack}>Back</Btn>
+      </div>
+      <p className="muted text-sm">There's no password reset, so pick something you'll remember. Your name and password together open your account.</p>
+    </form>
+  );
+}
+
+function MyGames({ db, account, onBack, onEdit, onHost }) {
+  const [info, setInfo] = useState({});
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ids = account.games.map((g) => g.id).join(",");
+  useEffect(() => {
+    let alive = true;
+    account.games.forEach((g) => {
+      db.doc("library/" + g.id).get().then((sn) => {
+        if (!alive) return;
+        const d = sn.exists ? sn.data() : null;
+        setInfo((x) => ({ ...x, [g.id]: { n: Array.isArray(d?.items) ? d.items.length : 0, setup: cleanSetup(d?.game) } }));
+      }).catch(() => {});
+    });
+    return () => { alive = false; };
+  }, [ids]);
+
+  if (!account.acct) {
+    return (
+      <div className="screen prep">
+        <div className="prep-inner">
+          <h1 className="display shared-title">My games</h1>
+          <LoginForm account={account} onBack={onBack} />
+        </div>
+      </div>
+    );
+  }
+
+  const newGame = async () => {
+    setBusy(true);
+    try {
+      const id = newSetId();
+      await db.doc("library/" + id).set({ items: [], game: { ...defaultSetup(), title: "New game" } });
+      account.addGame(id, "New game");
+      onEdit(id);
+    } catch (e) {
+      setMsg("Couldn't create the game. Check your connection and try again.");
+    }
+    setBusy(false);
+  };
+  const share = (id) => copyText(shareLink(id), null, (m) => { setMsg(m.startsWith("Link") ? "Share link copied! Send it to a friend." : shareLink(id)); });
+
+  return (
+    <div className="screen prep">
+      <div className="prep-inner">
+        <div className="prep-head">
+          <h1 className="display">My games</h1>
+          <Btn kind="ghost" onClick={onBack}>Back</Btn>
+        </div>
+        <p className="prep-lead">Logged in as <b>{account.acct.name}</b>. <button type="button" className="linkish" onClick={account.logout}>Log out</button></p>
+        <div><Btn big onClick={newGame} disabled={busy}>+ New game</Btn></div>
+        {msg && <p className="flash" style={{ overflowWrap: "anywhere" }}>{msg}</p>}
+        {!account.loaded ? <p className="pulse">Loading your games…</p> : account.games.length === 0 ? (
+          <div className="panel"><p className="text-lg">No games yet. Tap <b>+ New game</b> to make your first one.</p></div>
+        ) : (
+          <ul className="games-list">
+            {account.games.map((g) => {
+              const i = info[g.id];
+              return (
+                <li key={g.id} className="panel game-row">
+                  <div className="game-main">
+                    <h2 className="display">{g.title}</h2>
+                    <p className="muted">{i ? `${i.n} ${i.n === 1 ? "question" : "questions"} · ${i.setup.rounds} rounds · ${i.setup.mode === "teams" ? `${i.setup.teamA} vs ${i.setup.teamB}` : "everyone for themselves"}` : "…"}</p>
+                  </div>
+                  <div className="game-btns">
+                    <Btn onClick={() => onHost(g.id)}>Host it</Btn>
+                    <Btn kind="blue" onClick={() => onEdit(g.id)}>Edit</Btn>
+                    <Btn kind="ghost" onClick={() => share(g.id)}>Share</Btn>
+                    {confirmDel === g.id
+                      ? <Btn kind="red" onClick={() => { account.removeGame(g.id); setConfirmDel(null); }}>Remove it?</Btn>
+                      : <Btn kind="ghost" onClick={() => setConfirmDel(g.id)}>Remove</Btn>}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Prep({ db, onBack, onHost, account, initialSetId }) {
+  const [setId, setSetId] = useState(() => initialSetId || getSetId());
   const [library, save, err, loaded, setup, saveSetup] = useLibrary(db, setId);
   const shareRef = useRef(null);
   const [shareMsg, setShareMsg] = useState("");
+  // Logged in: keep this game in "My games" once it has something in it.
+  useEffect(() => {
+    if (account?.acct && account.loaded && loaded && library.length > 0 && !account.games.some((g) => g.id === setId)) {
+      account.addGame(setId, setup.title || "My game");
+    }
+  }, [account?.acct, account?.loaded, loaded, library.length, setId]);
   const [other, setOther] = useState("");
   const [msg, setMsg] = useState("");
   const switchSet = (e) => {
@@ -1830,6 +2043,10 @@ function Prep({ db, onBack, onHost }) {
         <p className="prep-lead">Set up your game days ahead: team names, rounds, and your own questions and answers. Everything saves automatically and is still here when you come back. Players never see this screen. On party night, tap <b>Host a new game</b> on the same device, and during the game tap <b>My next question</b> to play your questions in order.</p>
         <section className="panel">
           <h2 className="display text-2xl text-[var(--gold)]">Game setup</h2>
+          <label className="field">
+            <span>Game name</span>
+            <input id="setup-title" className="input" value={setup.title} maxLength={40} placeholder="Chanukah night 3 at Bubby's" onChange={(e) => { saveSetup({ title: e.target.value }); account?.renameGame(setId, e.target.value); }} />
+          </label>
           <div className="setup-grid">
             <label className="field">
               <span>Team 1 name</span>
@@ -2701,6 +2918,15 @@ function App() {
     return { kind: "landing" };
   });
   const [busy, setBusy] = useState("");
+  const account = useAccount(caps.db);
+  useEffect(() => {
+    const onHash = () => {
+      const m = (location.hash || "").match(/^#game-(s[a-z0-9]{8,16})$/);
+      if (m) setMode({ kind: "shared", setId: m[1] });
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   if (caps.loading) return <div className="screen center"><p className="pulse text-2xl">Lighting the candles…</p></div>;
   if (!caps.db) {
@@ -2741,10 +2967,13 @@ function App() {
   if (mode.kind === "remote") return <Remote db={db} code={mode.code} pin={mode.pin} onLeave={() => { local.del("lf-remote"); setMode({ kind: "landing" }); }} />;
   if (mode.kind === "shared") {
     const clearHash = () => { try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { location.hash = ""; } };
-    return <SharedGame db={db} setId={mode.setId} onDone={() => { clearHash(); setMode({ kind: "prep" }); }} onCancel={() => { clearHash(); setMode({ kind: "landing" }); }} />;
+    return <SharedGame db={db} account={account} setId={mode.setId} onDone={() => { clearHash(); setMode({ kind: "prep" }); }} onCancel={() => { clearHash(); setMode({ kind: "landing" }); }} />;
   }
-  if (mode.kind === "prep") return <Prep db={db} onBack={() => setMode({ kind: "landing" })} onHost={() => host(null)} />;
-  return <Landing db={db} onHost={() => host(null)} onResume={(c) => host(c)} onPrep={() => setMode({ kind: "prep" })} onRemote={(code, pin) => { local.set("lf-remote", JSON.stringify({ code, pin })); setMode({ kind: "remote", code, pin }); }} onJoin={(code, name) => setMode({ kind: "phone", code, name })} />;
+  const openPrep = (id) => { if (id) local.set("lf-set", id); setMode({ kind: "prep", setId: id || null }); };
+  const hostSet = (id) => { if (id) local.set("lf-set", id); host(null); };
+  if (mode.kind === "games") return <MyGames db={db} account={account} onBack={() => setMode({ kind: "landing" })} onEdit={openPrep} onHost={hostSet} />;
+  if (mode.kind === "prep") return <Prep key={mode.setId || "device"} db={db} account={account} initialSetId={mode.setId} onBack={() => setMode({ kind: account.acct ? "games" : "landing" })} onHost={() => host(null)} />;
+  return <Landing db={db} onHost={() => host(null)} onResume={(c) => host(c)} onPrep={() => setMode({ kind: "games" })} onRemote={(code, pin) => { local.set("lf-remote", JSON.stringify({ code, pin })); setMode({ kind: "remote", code, pin }); }} onJoin={(code, name) => setMode({ kind: "phone", code, name })} />;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
