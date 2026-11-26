@@ -1824,6 +1824,20 @@ function cleanGames(arr) {
     .map((g) => ({ id: g.id, title: clean(g.title, 40) || "Untitled game", at: Number(g.at) || 0 }));
 }
 
+const RC_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function makeRecoveryCode() {
+  const a = new Uint32Array(16);
+  crypto.getRandomValues(a);
+  const s = Array.from(a, (n) => RC_CHARS[n % RC_CHARS.length]).join("");
+  return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}`;
+}
+const normCode = (c) => String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+async function recoveryKey(name, code) {
+  const data = new TextEncoder().encode("latke-feud-recovery|" + name.trim().toLowerCase() + "|" + normCode(code));
+  const h = await crypto.subtle.digest("SHA-256", data);
+  return "a" + Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 function useAccount(db) {
   const [acct, setAcct] = useState(() => {
     try {
@@ -1833,20 +1847,27 @@ function useAccount(db) {
   });
   const [games, setGames] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  const [hasRecovery, setHasRecovery] = useState(true);
+  const [newCode, setNewCode] = useState(null);
   const gamesRef = useRef([]);
+  const rkRef = useRef(null);
   const ref = useMemo(() => (db && acct ? db.doc("accounts/" + acct.key) : null), [db, acct]);
   const write = useWriter(ref, () => {});
   useEffect(() => {
     gamesRef.current = [];
+    rkRef.current = null;
     setGames([]);
     setLoaded(false);
     if (!ref) return;
     let alive = true;
     ref.get().then((sn) => {
       if (!alive) return;
-      const g = sn.exists ? cleanGames(sn.data()?.games) : [];
+      const d = sn.exists ? sn.data() : null;
+      const g = cleanGames(d?.games);
+      rkRef.current = d?.rk || null;
       gamesRef.current = g;
       setGames(g);
+      setHasRecovery(!!d?.rk);
       setLoaded(true);
     }).catch(() => { if (alive) setLoaded(true); });
     return () => { alive = false; };
@@ -1854,7 +1875,19 @@ function useAccount(db) {
   const saveGames = (next) => {
     gamesRef.current = next;
     setGames(next);
-    if (acct) write({ name: acct.name, games: next });
+    if (acct) write({ name: acct.name, games: next, rk: rkRef.current });
+  };
+  const signIn = (key, name) => {
+    const a = { key, name };
+    local.set("lf-acct", JSON.stringify(a));
+    setAcct(a);
+  };
+  // Give an account a recovery code: a second document, found by name + code, that points at the account.
+  const attachRecovery = async (key, name) => {
+    const code = makeRecoveryCode();
+    const rk = await recoveryKey(name, code);
+    await db.doc("accounts/" + rk).set({ name, acct: key });
+    return { code, rk };
   };
   const login = async (name, pw, create) => {
     const n = clean(name, 30);
@@ -1862,25 +1895,62 @@ function useAccount(db) {
     try {
       const key = await accountKey(n, pw);
       const sn = await db.doc("accounts/" + key).get();
-      if (create && sn.exists) return "There's already an account with that name and password. Log in instead.";
-      if (!create && !sn.exists) return "No account with that name and password. Check them, or create a new account.";
+      const d = sn.exists ? sn.data() : null;
+      if (create && d) return "There's already an account with that name and password. Log in instead.";
+      if (!create && (!d || d.acct)) return "No account with that name and password. Check them, or tap Forgot password.";
+      if (!create && d.moved) return "This password was changed. Log in with your new password.";
       if (create) {
         // Bring along the game already prepared on this device, if it has questions.
         const cur = getSetId();
         const lib = await db.doc("library/" + cur).get();
-        const d = lib.exists ? lib.data() : null;
-        const start = d && Array.isArray(d.items) && d.items.length ? [{ id: cur, title: cleanSetup(d.game).title || "My first game", at: Date.now() }] : [];
-        await db.doc("accounts/" + key).set({ name: n, games: start });
+        const ld = lib.exists ? lib.data() : null;
+        const start = ld && Array.isArray(ld.items) && ld.items.length ? [{ id: cur, title: cleanSetup(ld.game).title || "My first game", at: Date.now() }] : [];
+        const { code, rk } = await attachRecovery(key, n);
+        await db.doc("accounts/" + key).set({ name: n, games: start, rk });
+        setNewCode(code);
       }
-      const a = { key, name: n };
-      local.set("lf-acct", JSON.stringify(a));
-      setAcct(a);
+      signIn(key, n);
       return null;
     } catch (e) {
       return "Couldn't reach the game server. Check your connection and try again.";
     }
   };
-  const logout = () => { local.del("lf-acct"); setAcct(null); };
+  const resetPassword = async (name, code, pw) => {
+    const n = clean(name, 30);
+    if (!n || normCode(code).length !== 16) return "Type your name and the 16-character recovery code.";
+    if ((pw || "").length < 4) return "Pick a new password of at least 4 characters.";
+    try {
+      const rk = await recoveryKey(n, code);
+      const rec = await db.doc("accounts/" + rk).get();
+      const rd = rec.exists ? rec.data() : null;
+      if (!rd || typeof rd.acct !== "string") return "That name and recovery code don't match an account. Check both and try again.";
+      const old = await db.doc("accounts/" + rd.acct).get();
+      const od = old.exists ? old.data() : {};
+      const key = await accountKey(n, pw);
+      if (key !== rd.acct) {
+        const clash = await db.doc("accounts/" + key).get();
+        if (clash.exists) return "Pick a different new password.";
+        await db.doc("accounts/" + key).set({ name: n, games: cleanGames(od.games), rk });
+        await db.doc("accounts/" + rk).set({ name: n, acct: key });
+        await db.doc("accounts/" + rd.acct).set({ name: n, games: [], moved: true });
+      }
+      signIn(key, n);
+      return null;
+    } catch (e) {
+      return "Couldn't reach the game server. Check your connection and try again.";
+    }
+  };
+  const setupRecovery = async () => {
+    if (!acct) return;
+    try {
+      const { code, rk } = await attachRecovery(acct.key, acct.name);
+      rkRef.current = rk;
+      write({ name: acct.name, games: gamesRef.current, rk });
+      setHasRecovery(true);
+      setNewCode(code);
+    } catch (e) {}
+  };
+  const logout = () => { local.del("lf-acct"); setAcct(null); setNewCode(null); };
   const addGame = (id, title) => {
     if (!acct || gamesRef.current.some((g) => g.id === id)) return;
     saveGames([{ id, title: clean(title, 40) || "Untitled game", at: Date.now() }, ...gamesRef.current]);
@@ -1890,25 +1960,53 @@ function useAccount(db) {
     saveGames(gamesRef.current.map((g) => (g.id === id ? { ...g, title: clean(title, 40) || "Untitled game", at: Date.now() } : g)));
   };
   const removeGame = (id) => saveGames(gamesRef.current.filter((g) => g.id !== id));
-  return { acct, games, loaded, login, logout, addGame, renameGame, removeGame };
+  return { acct, games, loaded, login, logout, addGame, renameGame, removeGame, resetPassword, setupRecovery, hasRecovery, newCode, clearNewCode: () => setNewCode(null) };
 }
 
 function LoginForm({ account, onBack }) {
+  const [view, setView] = useState("login");
   const [name, setName] = useState("");
   const [pw, setPw] = useState("");
+  const [code, setCode] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const go = async (create) => {
+  const go = async (fn) => {
     setBusy(true);
     setErr("");
-    const e = await account.login(name, pw, create);
+    const e = await fn();
     if (e) setErr(e);
     setBusy(false);
   };
+  if (view === "forgot") {
+    return (
+      <form className="panel login" onSubmit={(e) => { e.preventDefault(); go(() => account.resetPassword(name, code, pw)); }}>
+        <h2 className="display text-3xl text-[var(--gold)]">Forgot your password?</h2>
+        <p className="muted">Use the recovery code you saved when you made your account, then pick a new password. Your games stay as they are.</p>
+        <label className="field">
+          <span>Name</span>
+          <input id="reset-name" className="input" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} autoComplete="username" />
+        </label>
+        <label className="field">
+          <span>Recovery code</span>
+          <input id="reset-code" className="input code-mono" value={code} maxLength={24} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="XXXX-XXXX-XXXX-XXXX" autoComplete="off" />
+        </label>
+        <label className="field">
+          <span>New password</span>
+          <input id="reset-pw" className="input" type="password" value={pw} maxLength={64} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" placeholder="At least 4 characters" />
+        </label>
+        {err && <p className="err" role="alert">{err}</p>}
+        <div className="flex flex-wrap gap-3">
+          <button type="submit" className="btn btn-gold btn-big" disabled={busy}>Set new password</button>
+          <Btn kind="ghost" onClick={() => { setView("login"); setErr(""); }}>Back to log in</Btn>
+        </div>
+        <p className="muted text-sm">Lost the recovery code too? Make a new account. Games you shared with friends stay with them.</p>
+      </form>
+    );
+  }
   return (
-    <form className="panel login" onSubmit={(e) => { e.preventDefault(); go(false); }}>
-      <h2 className="display text-3xl text-[var(--gold)]">Log in to your games</h2>
-      <p className="muted">Your account keeps all the games you prepare, on any device. New here? Pick a name and password and tap Create account.</p>
+    <form className="panel login" onSubmit={(e) => { e.preventDefault(); go(() => account.login(name, pw, false)); }}>
+      <h2 className="display text-3xl text-[var(--gold)]">Host login</h2>
+      <p className="muted">Only the host needs an account. It keeps all the games you prepare, on any device. Players never log in: they just type the room code.</p>
       <label className="field">
         <span>Name</span>
         <input id="acct-name" className="input" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} autoComplete="username" placeholder="Gershon" />
@@ -1920,11 +2018,23 @@ function LoginForm({ account, onBack }) {
       {err && <p className="err" role="alert">{err}</p>}
       <div className="flex flex-wrap gap-3">
         <button type="submit" className="btn btn-gold btn-big" disabled={busy}>Log in</button>
-        <Btn kind="blue" onClick={() => go(true)} disabled={busy}>Create account</Btn>
+        <Btn kind="blue" onClick={() => go(() => account.login(name, pw, true))} disabled={busy}>Create account</Btn>
         <Btn kind="ghost" onClick={onBack}>Back</Btn>
       </div>
-      <p className="muted text-sm">There's no password reset, so pick something you'll remember. Your name and password together open your account.</p>
+      <button type="button" className="linkish" onClick={() => { setView("forgot"); setErr(""); }}>Forgot password?</button>
     </form>
+  );
+}
+
+function RecoveryCodeNotice({ account }) {
+  if (!account.newCode) return null;
+  return (
+    <div className="panel recovery">
+      <h2 className="display text-2xl text-[var(--gold)]">Save your recovery code</h2>
+      <p>If you ever forget your password, this code lets you set a new one. Take a screenshot or write it down. You won't see it again.</p>
+      <p className="recovery-code">{account.newCode}</p>
+      <div><Btn onClick={account.clearNewCode}>I saved it</Btn></div>
+    </div>
   );
 }
 
@@ -1979,6 +2089,13 @@ function MyGames({ db, account, onBack, onEdit, onHost }) {
           <Btn kind="ghost" onClick={onBack}>Back</Btn>
         </div>
         <p className="prep-lead">Logged in as <b>{account.acct.name}</b>. <button type="button" className="linkish" onClick={account.logout}>Log out</button></p>
+        <RecoveryCodeNotice account={account} />
+        {account.loaded && !account.hasRecovery && !account.newCode && (
+          <div className="panel recovery">
+            <p>Turn on password recovery so you can get back in if you forget your password.</p>
+            <div><Btn onClick={account.setupRecovery}>Get my recovery code</Btn></div>
+          </div>
+        )}
         <div><Btn big onClick={newGame} disabled={busy}>+ New game</Btn></div>
         {msg && <p className="flash" style={{ overflowWrap: "anywhere" }}>{msg}</p>}
         {!account.loaded ? <p className="pulse">Loading your games…</p> : account.games.length === 0 ? (
