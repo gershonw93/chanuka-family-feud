@@ -281,6 +281,7 @@ a.chip { text-decoration: none; display: inline-block; }
 .recovery-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: clamp(1.4rem, 5vw, 2.2rem); color: var(--gold); letter-spacing: .08em; user-select: all; overflow-wrap: anywhere; }
 .code-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
 .pin-in { font-size: 1.6rem; letter-spacing: .5em; max-width: 9em; text-align: center; }
+.update-banner { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 90; background: var(--gold); color: var(--ink); border: 0; border-radius: 999px; padding: 12px 20px; font: 600 1rem var(--body); box-shadow: 0 10px 30px rgba(0,0,0,.5); cursor: pointer; max-width: calc(100% - 32px); }
 .sent-note { font-weight: 700; font-size: 1.2rem; }
 .stage.open { justify-content: center; gap: clamp(16px, 3vh, 36px); }
 .stage.open .question { font-size: clamp(2.2rem, 4.6vw, 5rem); }
@@ -441,7 +442,7 @@ a.chip { text-decoration: none; display: inline-block; }
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
 <script>
-window.LF_BACKEND = {"url":"https://tcnhhjakjdyzozbwnbqy.supabase.co","key":"sb_publishable_8svqqYi_4Tl8dFRuDv7fqA_3sEmrqZb"};
+window.LF_BACKEND = {"url":"https://tcnhhjakjdyzozbwnbqy.supabase.co","key":"sb_publishable_8svqqYi_4Tl8dFRuDv7fqA_3sEmrqZb"}; window.LF_BUILD = "mwwzzzop";
 (() => {
   // src/questions.js
   var QUESTIONS = [
@@ -2618,6 +2619,7 @@ window.LF_BACKEND = {"url":"https://tcnhhjakjdyzozbwnbqy.supabase.co","key":"sb_
     return ACCT_ERRORS[r.error] || "Something went wrong. Try again.";
   }
   var OFFLINE = "Couldn't reach the game server. Check your connection and try again.";
+  var STALE = "This page is out of date. Refresh the page, then try again.";
   function useAccount(db) {
     const can = !!(db && typeof db.rpc === "function");
     const [sess, setSess] = useState(() => {
@@ -2691,10 +2693,10 @@ window.LF_BACKEND = {"url":"https://tcnhhjakjdyzozbwnbqy.supabase.co","key":"sb_
       try {
         return await db.rpc(fn, args);
       } catch (e) {
-        return { error: "_offline" };
+        return { error: e && e.code === "invalid_argument" ? "_stale" : "_offline" };
       }
     };
-    const msg = (r) => r && r.error === "_offline" ? OFFLINE : acctError(r);
+    const msg = (r) => r && r.error === "_offline" ? OFFLINE : r && r.error === "_stale" ? STALE : acctError(r);
     const login = async (name, pin, create) => {
       if (!clean(name, 30)) return ACCT_ERRORS.bad_name;
       if (!/^\d{4}$/.test(pin || "")) return ACCT_ERRORS.bad_pin;
@@ -3311,7 +3313,38 @@ window.LF_BACKEND = {"url":"https://tcnhhjakjdyzozbwnbqy.supabase.co","key":"sb_
     const showStrikes = s.phase === "round" || s.phase === "steal";
     return /* @__PURE__ */ React.createElement("div", { className: "phone-card" + (hot ? " hot" : "") }, /* @__PURE__ */ React.createElement("h2", { className: "display text-3xl" }, title), /* @__PURE__ */ React.createElement("p", { className: "phone-q" }, s.question), s.typed && /* @__PURE__ */ React.createElement("p", { className: "typed small " + s.typed.verdict }, s.typed.name, ": \u201C", s.typed.text, "\u201D ", s.typed.verdict === "pending" ? "(host is checking\u2026)" : s.typed.verdict === "hit" ? "\u2713 on the board" : s.typed.verdict === "dup" ? "(already up)" : s.typed.verdict === "override" ? "(host is deciding)" : "\u2715 not on the board"), answer, /* @__PURE__ */ React.createElement("div", { className: "stakes" }, showStrikes && /* @__PURE__ */ React.createElement("div", { className: "phone-strikes", "aria-label": `${s.strikes} of 3 strikes` }, [0, 1, 2].map((i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "pstrike" + (i < s.strikes ? " on" : "") }, /* @__PURE__ */ React.createElement(XMark, { off: i >= s.strikes })))), /* @__PURE__ */ React.createElement("p", { className: "stakes-line" }, situation(s, mySide)), !s.openQ && s.board.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "stakes-nums" }, /* @__PURE__ */ React.createElement("span", null, "Bank ", /* @__PURE__ */ React.createElement("b", null, s.bank)), /* @__PURE__ */ React.createElement("span", null, "Hidden answers ", /* @__PURE__ */ React.createElement("b", null, hidden)))), /* @__PURE__ */ React.createElement("div", { className: "mini-scores" }, st.map((x) => /* @__PURE__ */ React.createElement("span", { key: x.side, className: x.side === mySide ? "me" : "" }, x.name, x.side === mySide ? " (you)" : "", " ", /* @__PURE__ */ React.createElement("b", null, x.score)))));
   }
+  function UpdateBanner() {
+    const [ready, setReady] = useState(false);
+    useEffect(() => {
+      if (!WEB || !window.LF_BUILD) return;
+      let alive = true;
+      const check = async () => {
+        try {
+          const r = await fetch("/version.json?t=" + Date.now(), { cache: "no-store" });
+          const v = await r.json();
+          if (alive && v && v.build && v.build !== window.LF_BUILD) setReady(true);
+        } catch (e) {
+        }
+      };
+      const iv = setInterval(check, 6e4);
+      const onVis = () => {
+        if (document.visibilityState === "visible") check();
+      };
+      document.addEventListener("visibilitychange", onVis);
+      check();
+      return () => {
+        alive = false;
+        clearInterval(iv);
+        document.removeEventListener("visibilitychange", onVis);
+      };
+    }, []);
+    if (!ready) return null;
+    return /* @__PURE__ */ React.createElement("button", { type: "button", className: "update-banner", onClick: () => location.reload() }, "A new version of the game is ready. ", /* @__PURE__ */ React.createElement("b", null, "Tap to refresh"));
+  }
   function App() {
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(AppMain, null), /* @__PURE__ */ React.createElement(UpdateBanner, null));
+  }
+  function AppMain() {
     const caps = useCapabilities();
     const [mode, setMode] = useState(() => {
       const m = (location.hash || "").match(/^#game-(s[a-z0-9]{8,16})$/);

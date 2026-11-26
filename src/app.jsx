@@ -1840,6 +1840,7 @@ function acctError(r) {
   return ACCT_ERRORS[r.error] || "Something went wrong. Try again.";
 }
 const OFFLINE = "Couldn't reach the game server. Check your connection and try again.";
+const STALE = "This page is out of date. Refresh the page, then try again.";
 
 function useAccount(db) {
   const can = !!(db && typeof db.rpc === "function");
@@ -1899,9 +1900,9 @@ function useAccount(db) {
     if (r.recovery) setNewCode(r.recovery);
   };
   const run = async (fn, args) => {
-    try { return await db.rpc(fn, args); } catch (e) { return { error: "_offline" }; }
+    try { return await db.rpc(fn, args); } catch (e) { return { error: e && e.code === "invalid_argument" ? "_stale" : "_offline" }; }
   };
-  const msg = (r) => (r && r.error === "_offline" ? OFFLINE : acctError(r));
+  const msg = (r) => (r && r.error === "_offline" ? OFFLINE : r && r.error === "_stale" ? STALE : acctError(r));
 
   const login = async (name, pin, create) => {
     if (!clean(name, 30)) return ACCT_ERRORS.bad_name;
@@ -3100,7 +3101,38 @@ function WatchCard({ s, title, hot, answer, mySide }) {
 /* App shell                                                           */
 /* ------------------------------------------------------------------ */
 
+// The public site checks for a newer version and offers a refresh, so old pages don't linger.
+function UpdateBanner() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!WEB || !window.LF_BUILD) return;
+    let alive = true;
+    const check = async () => {
+      try {
+        const r = await fetch("/version.json?t=" + Date.now(), { cache: "no-store" });
+        const v = await r.json();
+        if (alive && v && v.build && v.build !== window.LF_BUILD) setReady(true);
+      } catch (e) {}
+    };
+    const iv = setInterval(check, 60000);
+    const onVis = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", onVis);
+    check();
+    return () => { alive = false; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
+  if (!ready) return null;
+  return (
+    <button type="button" className="update-banner" onClick={() => location.reload()}>
+      A new version of the game is ready. <b>Tap to refresh</b>
+    </button>
+  );
+}
+
 function App() {
+  return <><AppMain /><UpdateBanner /></>;
+}
+
+function AppMain() {
   const caps = useCapabilities();
   const [mode, setMode] = useState(() => {
     const m = (location.hash || "").match(/^#game-(s[a-z0-9]{8,16})$/);

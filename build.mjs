@@ -18,7 +18,8 @@ const tpl = readFileSync("src/template.html", "utf8");
 const artifact = tpl.replace("/*__CONFIG__*/", "").replace("/*__APP__*/", () => js);
 writeFileSync("latke-feud.html", artifact);
 
-const config = `window.LF_BACKEND = ${JSON.stringify({ url: SUPABASE_URL, key: SUPABASE_KEY })};`;
+const BUILD = Date.now().toString(36);
+const config = `window.LF_BACKEND = ${JSON.stringify({ url: SUPABASE_URL, key: SUPABASE_KEY })}; window.LF_BUILD = ${JSON.stringify(BUILD)};`;
 const head = `<!doctype html>
 <html lang="en">
 <head>
@@ -39,4 +40,9 @@ const web = head + tpl
 mkdirSync("web", { recursive: true });
 writeFileSync("web/index.html", web);
 copyFileSync("thumb.png", "web/thumb.png");
+writeFileSync("web/version.json", JSON.stringify({ build: BUILD }));
+writeFileSync("web/vercel.json", JSON.stringify({ headers: [
+  { source: "/", headers: [{ key: "Cache-Control", value: "no-cache" }] },
+  { source: "/version.json", headers: [{ key: "Cache-Control", value: "no-store" }] },
+] }, null, 2));
 console.log("built latke-feud.html and web/index.html");
